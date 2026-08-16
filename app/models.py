@@ -6,8 +6,8 @@ from typing import Literal
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
-from .database import Message, get_session
-from .schemas import AddressSummary, MessageOut
+from app.database import Message, get_session
+from app.schemas import AddressSummary, MessageOut
 
 
 def _to_schema(msg: Message) -> MessageOut:

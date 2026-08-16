@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Path, Query
+from sqlalchemy import func
 
-from ..config import get_settings
-from ..database import Message, get_session
-from ..models import query_messages
-from ..schemas import AircraftListResponse, AircraftSummary, MessagesResponse
+from app.config import get_settings
+from app.database import Message, get_session
+from app.models import query_messages
+from app.schemas import AircraftListResponse, AircraftSummary, MessagesResponse
 
 router = APIRouter()
 
@@ -40,8 +41,6 @@ async def aircraft_messages(
 async def list_aircraft(
     hours: int = Query(24, ge=1, le=168, description="Lookback window in hours"),
 ) -> AircraftListResponse:
-    from sqlalchemy import func, text
-
     settings = get_settings()
     window = f"-{hours} hours"
 

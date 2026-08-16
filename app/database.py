@@ -6,7 +6,7 @@ from typing import Generator
 from sqlalchemy import Index, Integer, String, UniqueConstraint, create_engine, event
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
-from .config import get_settings
+from app.config import get_settings
 
 
 class Base(DeclarativeBase):

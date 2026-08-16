@@ -18,9 +18,9 @@ from sqlalchemy import func
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import SQLAlchemyError
 
-from .config import get_settings
-from .database import CollectorState, Message, get_session, init_db
-from .parser import parse_message
+from app.config import get_settings
+from app.database import CollectorState, Message, get_session, init_db
+from app.parser import parse_message
 
 log = logging.getLogger(__name__)
 

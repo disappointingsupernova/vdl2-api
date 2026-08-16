@@ -7,10 +7,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .collector import purge_old_messages, run_collector
-from .config import get_settings
-from .database import init_db
-from .routes import aircraft, health, messages, stats
+from app.collector import purge_old_messages, run_collector
+from app.config import get_settings
+from app.database import init_db
+from app.routes import aircraft, health, messages, stats
 
 logging.basicConfig(
     level=logging.INFO,

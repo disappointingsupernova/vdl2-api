@@ -4,9 +4,9 @@ from typing import Optional
 
 from fastapi import APIRouter, Query
 
-from ..config import get_settings
-from ..models import query_messages
-from ..schemas import MessagesResponse
+from app.config import get_settings
+from app.models import query_messages
+from app.schemas import MessagesResponse
 
 router = APIRouter()
 

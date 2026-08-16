@@ -6,9 +6,9 @@ from sqlalchemy import func
 
 from fastapi import APIRouter
 
-from ..config import get_settings
-from ..database import Message, get_session
-from ..schemas import HealthResponse
+from app.config import get_settings
+from app.database import Message, get_session
+from app.schemas import HealthResponse
 
 router = APIRouter()
 
