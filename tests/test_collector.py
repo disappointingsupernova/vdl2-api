@@ -110,8 +110,66 @@ def test_collector_resumes_from_checkpoint(env, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Retention
+# Rotation detection
 # ---------------------------------------------------------------------------
+
+def test_rotation_drains_old_file_and_switches_to_new(env, tmp_path):
+    """
+    Verify the rotation detection logic: when _inode() returns a different
+    value for the spool path, the collector drains the current file handle
+    and reopens the spool.
+
+    We mock _inode to control when rotation appears to occur, and intercept
+    the drain-of-old-file call to write the new spool content at the right
+    moment. Both pre- and post-rotation messages must end up in the database.
+    """
+    from unittest.mock import patch as mock_patch
+    from app.collector import drain as real_drain
+
+    db, _ = env
+    spool = str(tmp_path / "messages.jsonl")
+
+    line1 = '{"t":1786897449,"freq":136975000,"station_id":"s","avlc":{"src":{"addr":"AAAAAA","type":"Aircraft"},"dst":{"addr":"1099CA","type":"Ground station"}}}'
+    line2 = '{"t":1786897512,"freq":136975000,"station_id":"s","avlc":{"src":{"addr":"BBBBBB","type":"Aircraft"},"dst":{"addr":"1099CA","type":"Ground station"}}}'
+
+    _write_spool(spool, [line1])
+
+    # inode sequence:
+    #   call 1 (open)           → 100  sets current_inode
+    #   call 2 (rotation check) → 100  no rotation; drain AAAAAA
+    #   call 3 (rotation check) → 200  rotation detected
+    #   call 4 (open new file)  → 200  sets current_inode
+    #   call 5 (rotation check) → 200  stable; drain BBBBBB
+    inode_seq = iter([100, 100, 200, 200, 200, 200])
+
+    def _fake_inode(path):
+        return next(inode_seq, 200)
+
+    rotation_drained = [False]
+
+    drain_calls = []
+
+    def _fake_drain(fh, db_path, spool_path):
+        drain_calls.append(spool_path)
+        result = real_drain(fh, db_path, spool_path)
+        if not rotation_drained[0]:
+            rotation_drained[0] = True
+            # Write new content to spool and reset the checkpoint so the
+            # collector reads from offset 0 on reopen (simulates a new file).
+            _write_spool(spool, [line2])
+            save_offset(db, spool, 0)
+        return result
+
+    with mock_patch("app.collector._inode", side_effect=_fake_inode), \
+         mock_patch("app.collector.time.sleep", return_value=None), \
+         mock_patch("app.collector.drain", side_effect=_fake_drain):
+        run_collector(spool_path=spool, db_path=db, poll_interval=0.001, _stop_after=8)
+
+    with get_session(db) as session:
+        icaos = {m.source_icao for m in session.query(Message).all()}
+
+    assert "AAAAAA" in icaos, "Pre-rotation message not found"
+    assert "BBBBBB" in icaos, "Post-rotation message not found"
 
 def test_purge_old_messages(env):
     db, _ = env
