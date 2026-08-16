@@ -13,7 +13,7 @@ ExecStart=/usr/local/bin/dumpvdl2 \
     --rtlsdr ${DUMPVDL2_DEVICE} \
     --station-id ${DUMPVDL2_STATION_ID} \
     --utc \
-    --output decoded:json:file:path=/var/lib/vdl2/messages.jsonl,rotate=hourly \
+    --output decoded:json:file:path=/var/lib/vdl2/messages.jsonl \
     136.725M \
     136.775M \
     136.825M \
