@@ -2,17 +2,16 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from sqlalchemy import func
+
 from fastapi import APIRouter
 
-from sqlalchemy import text
-
 from ..config import get_settings
-from ..database import get_engine
+from ..database import Message, get_session
 from ..schemas import HealthResponse
 
 router = APIRouter()
 
-# Set by the collector background task in main.py
 collector_running: bool = False
 
 
@@ -26,15 +25,18 @@ async def health() -> HealthResponse:
     age_seconds = None
 
     try:
-        with get_engine(settings.database).connect() as conn:
-            total = conn.execute(text("SELECT COUNT(*) FROM messages")).scalar() or 0
-            row = conn.execute(
-                text("SELECT inserted_at FROM messages ORDER BY id DESC LIMIT 1")
-            ).fetchone()
-            if row:
-                last_msg_at = row[0]
+        with get_session(settings.database) as session:
+            total = session.query(func.count(Message.id)).scalar() or 0
+            last = (
+                session.query(Message.inserted_at)
+                .order_by(Message.id.desc())
+                .limit(1)
+                .scalar()
+            )
+            if last:
+                last_msg_at = last
                 try:
-                    dt = datetime.fromisoformat(last_msg_at.replace("Z", "+00:00"))
+                    dt = datetime.fromisoformat(last.replace("Z", "+00:00"))
                     age_seconds = (datetime.now(tz=timezone.utc) - dt).total_seconds()
                 except ValueError:
                     pass

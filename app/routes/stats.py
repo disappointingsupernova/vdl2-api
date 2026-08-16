@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+from sqlalchemy import func
+
 from fastapi import APIRouter
 
-from sqlalchemy import text
-
 from ..config import get_settings
-from ..database import get_engine
+from ..database import Message, get_session
 from ..schemas import StatsResponse
 
 router = APIRouter()
@@ -14,30 +14,38 @@ router = APIRouter()
 @router.get("/stats", response_model=StatsResponse, summary="Aggregate message statistics")
 async def stats() -> StatsResponse:
     settings = get_settings()
-    with get_engine(settings.database).connect() as conn:
-        total = conn.execute(text("SELECT COUNT(*) FROM messages")).scalar()
 
-        last_minute = conn.execute(
-            text("SELECT COUNT(*) FROM messages WHERE received_at >= datetime('now', '-1 minute')")
-        ).scalar()
+    with get_session(settings.database) as session:
+        total = session.query(func.count(Message.id)).scalar() or 0
 
-        last_hour = conn.execute(
-            text("SELECT COUNT(*) FROM messages WHERE received_at >= datetime('now', '-1 hour')")
-        ).scalar()
+        last_minute = (
+            session.query(func.count(Message.id))
+            .filter(Message.received_at >= func.datetime("now", "-1 minutes"))
+            .scalar() or 0
+        )
 
-        freq_rows = conn.execute(text("""
-            SELECT frequency_hz, COUNT(*) AS cnt
-            FROM messages
-            WHERE frequency_hz IS NOT NULL
-            GROUP BY frequency_hz
-        """)).mappings().all()
-        by_freq = {str(r["frequency_hz"]): r["cnt"] for r in freq_rows}
+        last_hour = (
+            session.query(func.count(Message.id))
+            .filter(Message.received_at >= func.datetime("now", "-1 hours"))
+            .scalar() or 0
+        )
 
-        unique_aircraft = conn.execute(text("""
-            SELECT COUNT(DISTINCT source_icao) FROM messages
-            WHERE source_icao IS NOT NULL
-              AND received_at >= datetime('now', '-1 hour')
-        """)).scalar()
+        freq_rows = (
+            session.query(Message.frequency_hz, func.count(Message.id).label("cnt"))
+            .filter(Message.frequency_hz.isnot(None))
+            .group_by(Message.frequency_hz)
+            .all()
+        )
+        by_freq = {str(r.frequency_hz): r.cnt for r in freq_rows}
+
+        unique_aircraft = (
+            session.query(func.count(func.distinct(Message.source_icao)))
+            .filter(
+                Message.source_icao.isnot(None),
+                Message.received_at >= func.datetime("now", "-1 hours"),
+            )
+            .scalar() or 0
+        )
 
     return StatsResponse(
         messages_total=total,

@@ -2,10 +2,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Path, Query
 
-from sqlalchemy import text
-
 from ..config import get_settings
-from ..database import get_engine
+from ..database import Message, get_session
 from ..models import query_messages
 from ..schemas import AircraftListResponse, AircraftSummary, MessagesResponse
 
@@ -42,35 +40,39 @@ async def aircraft_messages(
 async def list_aircraft(
     hours: int = Query(24, ge=1, le=168, description="Lookback window in hours"),
 ) -> AircraftListResponse:
+    from sqlalchemy import func, text
+
     settings = get_settings()
-    with get_engine(settings.database).connect() as conn:
-        rows = conn.execute(
-            text("""
-            SELECT
-                source_icao                          AS icao,
-                MIN(received_at)                     AS first_seen,
-                MAX(received_at)                     AS last_seen,
-                COUNT(*)                             AS message_count,
-                MAX(aircraft_registration)           AS registration,
-                MAX(flight_id)                       AS flight_id
-            FROM messages
-            WHERE source_icao IS NOT NULL
-              AND received_at >= datetime('now', :window)
-            GROUP BY source_icao
-            ORDER BY last_seen DESC
-            """),
-            {"window": f"-{hours} hours"},
-        ).mappings().all()
+    window = f"-{hours} hours"
+
+    with get_session(settings.database) as session:
+        rows = (
+            session.query(
+                Message.source_icao.label("icao"),
+                func.min(Message.received_at).label("first_seen"),
+                func.max(Message.received_at).label("last_seen"),
+                func.count().label("message_count"),
+                func.max(Message.aircraft_registration).label("registration"),
+                func.max(Message.flight_id).label("flight_id"),
+            )
+            .filter(
+                Message.source_icao.isnot(None),
+                Message.received_at >= func.datetime("now", window),
+            )
+            .group_by(Message.source_icao)
+            .order_by(func.max(Message.received_at).desc())
+            .all()
+        )
 
     return AircraftListResponse(
         aircraft=[
             AircraftSummary(
-                icao=r["icao"],
-                first_seen=r["first_seen"],
-                last_seen=r["last_seen"],
-                message_count=r["message_count"],
-                registration=r["registration"],
-                flight_id=r["flight_id"],
+                icao=r.icao,
+                first_seen=r.first_seen,
+                last_seen=r.last_seen,
+                message_count=r.message_count,
+                registration=r.registration,
+                flight_id=r.flight_id,
             )
             for r in rows
         ]

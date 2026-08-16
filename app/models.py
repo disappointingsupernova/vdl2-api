@@ -1,18 +1,18 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Literal
 
-from sqlalchemy import text
+from sqlalchemy import func, or_
+from sqlalchemy.orm import Session
 
-from .database import get_engine
+from .database import Message, get_session
 from .schemas import AddressSummary, MessageOut
 
 
-def _row_to_message(row: Any) -> MessageOut:
-    raw_json = row.raw_json or "{}"
+def _to_schema(msg: Message) -> MessageOut:
     try:
-        raw = json.loads(raw_json)
+        raw = json.loads(msg.raw_json or "{}")
     except json.JSONDecodeError:
         raw = {}
 
@@ -21,19 +21,19 @@ def _row_to_message(row: Any) -> MessageOut:
     dst = avlc.get("dst") or {}
 
     return MessageOut(
-        id=row.id,
-        timestamp=row.received_at,
-        timestamp_ms=row.received_at_epoch_ms,
-        ingested_at=row.inserted_at,
-        station_id=row.station_id,
-        frequency_hz=row.frequency_hz,
-        source=AddressSummary(icao=row.source_icao, type=src.get("type")),
-        destination=AddressSummary(icao=row.destination_icao, type=dst.get("type")),
-        direction=row.direction,
-        message_type=row.message_type,
-        aircraft_registration=row.aircraft_registration,
-        flight_id=row.flight_id,
-        message_text=row.message_text,
+        id=msg.id,
+        timestamp=msg.received_at,
+        timestamp_ms=msg.received_at_epoch_ms,
+        ingested_at=msg.inserted_at,
+        station_id=msg.station_id,
+        frequency_hz=msg.frequency_hz,
+        source=AddressSummary(icao=msg.source_icao, type=src.get("type")),
+        destination=AddressSummary(icao=msg.destination_icao, type=dst.get("type")),
+        direction=msg.direction,
+        message_type=msg.message_type,
+        aircraft_registration=msg.aircraft_registration,
+        flight_id=msg.flight_id,
+        message_text=msg.message_text,
         raw=raw,
     )
 
@@ -47,28 +47,22 @@ def query_messages(
     until: str | None = None,
     icao: str | None = None,
     frequency: int | None = None,
-    order: str = "ASC",
+    order: Literal["ASC", "DESC"] = "ASC",
 ) -> list[MessageOut]:
-    clauses = ["id > :after_id"]
-    params: dict[str, Any] = {"after_id": after_id, "limit": limit}
+    with get_session(db_path) as session:
+        q = session.query(Message).filter(Message.id > after_id)
 
-    if since:
-        clauses.append("received_at >= :since")
-        params["since"] = since
-    if until:
-        clauses.append("received_at <= :until")
-        params["until"] = until
-    if icao:
-        clauses.append("(source_icao = :icao OR destination_icao = :icao)")
-        params["icao"] = icao.upper()
-    if frequency:
-        clauses.append("frequency_hz = :frequency")
-        params["frequency"] = frequency
+        if since:
+            q = q.filter(Message.received_at >= since)
+        if until:
+            q = q.filter(Message.received_at <= until)
+        if icao:
+            upper = icao.upper()
+            q = q.filter(or_(Message.source_icao == upper, Message.destination_icao == upper))
+        if frequency:
+            q = q.filter(Message.frequency_hz == frequency)
 
-    where = " AND ".join(clauses)
-    sql = text(f"SELECT * FROM messages WHERE {where} ORDER BY id {order} LIMIT :limit")
+        q = q.order_by(Message.id.asc() if order == "ASC" else Message.id.desc())
+        rows = q.limit(limit).all()
 
-    with get_engine(db_path).connect() as conn:
-        rows = conn.execute(sql, params).mappings().all()
-
-    return [_row_to_message(r) for r in rows]
+    return [_to_schema(m) for m in rows]
