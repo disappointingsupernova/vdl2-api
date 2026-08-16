@@ -8,10 +8,12 @@ Type=simple
 User=vdl2
 Group=vdl2
 
+EnvironmentFile=-/opt/vdl2-api/.env
+
 ExecStartPre=/bin/mkdir -p /var/lib/vdl2
 ExecStart=/usr/local/bin/dumpvdl2 \
-    --rtlsdr ${DUMPVDL2_DEVICE} \
-    --station-id ${DUMPVDL2_STATION_ID} \
+    --rtlsdr $DUMPVDL2_DEVICE \
+    --station-id $DUMPVDL2_STATION_ID \
     --utc \
     --output decoded:json:file:path=/var/lib/vdl2/messages.jsonl \
     136.725M \
@@ -31,8 +33,6 @@ ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 ReadWritePaths=/var/lib/vdl2
-
-EnvironmentFile=-/opt/vdl2-api/.env
 
 [Install]
 WantedBy=multi-user.target

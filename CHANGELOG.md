@@ -10,6 +10,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.0.4] — 2026-08-16
+
+### Fixed
+
+- `systemd/vdl2-api.service`: `${VDL2_API_HOST:-0.0.0.0}` and
+  `${VDL2_API_PORT:-5001}` used bash default-value syntax which systemd
+  does not support. Systemd only expands `$VAR` or `${VAR}` — the `:-`
+  fallback syntax is passed literally to the process, causing uvicorn to
+  fail with `'${VDL2_API_PORT:-5001}' is not a valid integer`.
+  Fixed by declaring defaults via `Environment=` directives in the unit
+  (which `EnvironmentFile=` values override) and using plain `$VAR`
+  in `ExecStart`.
+
+---
+
 ## [1.0.2] — 2026-08-17
 
 ### Fixed

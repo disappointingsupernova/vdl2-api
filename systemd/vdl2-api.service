@@ -12,10 +12,14 @@ WorkingDirectory=/opt/vdl2-api
 
 EnvironmentFile=-/opt/vdl2-api/.env
 
+# Defaults — override in /opt/vdl2-api/.env
+Environment=VDL2_API_HOST=0.0.0.0
+Environment=VDL2_API_PORT=5001
+
 ExecStartPre=/bin/mkdir -p /var/lib/vdl2
 ExecStart=/opt/vdl2-api/venv/bin/python -m uvicorn app.main:app \
-    --host ${VDL2_API_HOST:-0.0.0.0} \
-    --port ${VDL2_API_PORT:-5001} \
+    --host $VDL2_API_HOST \
+    --port $VDL2_API_PORT \
     --no-access-log
 
 Restart=on-failure
