@@ -8,6 +8,7 @@
 ![SQLite](https://img.shields.io/badge/database-SQLite-003B57)
 ![License](https://img.shields.io/badge/license-Apache%202.0-green)
 ![Platform](https://img.shields.io/badge/platform-Raspberry%20Pi%20%7C%20Linux-lightgrey)
+![Tests](https://img.shields.io/badge/tests-54%20passing-brightgreen)
 
 ---
 
@@ -24,11 +25,12 @@ This service sits between `dumpvdl2` and any application that wants to consume t
 - **No-loss polling** — messages are stored permanently and retrieved by cursor (`after_id`), not by timestamp window. A client that stops polling for an hour resumes exactly where it left off.
 - **Duplicate protection** — SHA-256 hash of each raw message prevents duplicates if the spool is replayed after a crash.
 - **File rotation handling** — detects `dumpvdl2`'s hourly JSONL rotation by inode comparison and drains the old file before switching.
-- **Crash recovery** — byte-offset checkpoint persisted to SQLite after every line; restarts resume without re-reading the whole file.
+- **Crash recovery** — byte-offset checkpoint persisted to SQLite after every batch; restarts resume without re-reading the whole file.
 - **Raw JSON preservation** — the complete original `dumpvdl2` JSON is stored verbatim. Future field additions require no schema changes.
 - **Optional API key authentication** — disabled by default; enabled by setting `VDL2_API_KEY`.
 - **Configurable CORS** — for browser-based dashboard clients.
 - **systemd integration** — hardened service units with `ProtectSystem`, `ProtectHome`, `PrivateTmp`.
+- **Graceful shutdown** — collector thread is signalled on shutdown and joined with a timeout; in-flight batch is safely re-processed on next start.
 
 ---
 
@@ -60,12 +62,27 @@ flowchart TD
 - Python 3.11+
 - `dumpvdl2` 2.7.0 with `libacars` 2.2.1
 - RTL-SDR (Nooelec NESDR SMArt v5, serial `64466840`)
+- `rsync`, `git`, `curl` (used by the install and update scripts)
 
 ---
 
 ## Installation
 
-### 1. Create a dedicated user and data directory
+The quickest path is the install script. It checks all dependencies, creates the system user, installs the application, and enables the systemd units.
+
+```bash
+git clone https://github.com/disappointingsupernova/vdl2-api /opt/vdl2-api
+cd /opt/vdl2-api
+sudo bash scripts/install.sh
+```
+
+The script is idempotent — running it again on an existing installation updates the files without touching the database or `.env`.
+
+### Manual installation
+
+If you prefer to install step by step:
+
+#### 1. Create a dedicated user and data directory
 
 ```bash
 sudo useradd -r -s /usr/sbin/nologin vdl2
@@ -76,7 +93,7 @@ sudo chown vdl2:vdl2 /var/lib/vdl2
 sudo usermod -aG plugdev vdl2
 ```
 
-### 2. Install the application
+#### 2. Install the application
 
 ```bash
 sudo mkdir -p /opt/vdl2-api
@@ -89,7 +106,7 @@ python3 -m venv venv
 venv/bin/pip install -r requirements.txt
 ```
 
-### 3. Configure the environment
+#### 3. Configure the environment
 
 ```bash
 sudo cp /opt/vdl2-api/.env.example /opt/vdl2-api/.env
@@ -110,7 +127,7 @@ Key variables:
 | `VDL2_CORS_ORIGINS` | _(empty)_ | Comma-separated allowed CORS origins |
 | `VDL2_API_KEY` | _(empty)_ | X-API-Key value; empty disables authentication |
 
-### 4. Install systemd units
+#### 4. Install systemd units
 
 ```bash
 sudo cp /opt/vdl2-api/systemd/dumpvdl2.service /etc/systemd/system/
@@ -118,20 +135,41 @@ sudo cp /opt/vdl2-api/systemd/vdl2-api.service /etc/systemd/system/
 sudo systemctl daemon-reload
 ```
 
-### 5. Enable and start the services
+#### 5. Enable and start the services
 
 ```bash
 sudo systemctl enable --now dumpvdl2.service
 sudo systemctl enable --now vdl2-api.service
 ```
 
-### 6. Verify
+#### 6. Verify
 
 ```bash
 sudo systemctl status dumpvdl2.service
 sudo systemctl status vdl2-api.service
 journalctl -u vdl2-api.service -f
 ```
+
+---
+
+## Updating
+
+To update to the latest version:
+
+```bash
+sudo bash /opt/vdl2-api/scripts/update.sh
+```
+
+The update script:
+
+1. Stops `vdl2-api.service` (leaves `dumpvdl2` running)
+2. Backs up `.env` and the database to `/var/lib/vdl2/backups/<timestamp>/`
+3. Pulls the latest code from git (`git pull --ff-only`)
+4. Updates Python dependencies
+5. Reinstalls systemd units if they have changed
+6. Restarts the service and polls the health endpoint to confirm it came up
+
+The database and `.env` are never overwritten. The 5 most recent backups are kept.
 
 ---
 
@@ -169,8 +207,8 @@ Return messages with `id > after_id`.
 |---|---|---|---|
 | `after_id` | int | `0` | Cursor — return messages after this id |
 | `limit` | int | `500` | Max messages to return (max 5000) |
-| `since` | string | — | ISO 8601 UTC lower bound on `received_at` |
-| `until` | string | — | ISO 8601 UTC upper bound on `received_at` |
+| `since` | datetime | — | ISO 8601 UTC lower bound on `received_at` — returns 422 if malformed |
+| `until` | datetime | — | ISO 8601 UTC upper bound on `received_at` — returns 422 if malformed |
 | `icao` | string | — | Filter by source or destination ICAO |
 | `frequency` | int | — | Filter by frequency in Hz |
 
@@ -209,7 +247,7 @@ curl "http://adsb-pi:5001/api/v1/messages?after_id=18452&limit=1000"
 
 ### `GET /api/v1/messages/latest`
 
-Return the newest N messages.
+Return the newest N messages, ordered newest first.
 
 ```bash
 curl "http://adsb-pi:5001/api/v1/messages/latest?limit=50"
@@ -313,6 +351,8 @@ Pass the key in the `X-API-Key` header:
 curl -H "X-API-Key: your-generated-key" "http://adsb-pi:5001/api/v1/messages"
 ```
 
+Failed authentication attempts are logged at WARNING level with the reason (missing header vs invalid key) but never the key value itself.
+
 ---
 
 ## Running tests
@@ -322,6 +362,8 @@ pip install -r requirements-dev.txt
 pytest -v
 ```
 
+54 tests across 6 test files. No external services required — the suite uses temporary SQLite databases and FastAPI's `TestClient`.
+
 ---
 
 ## Project layout
@@ -329,30 +371,35 @@ pytest -v
 ```
 /opt/vdl2-api/
 ├── app/
-│   ├── main.py          # FastAPI app factory, lifespan, CORS, auth wiring
-│   ├── config.py        # Pydantic settings (VDL2_* env vars)
-│   ├── database.py      # SQLAlchemy ORM models, engine factory, get_session()
+│   ├── main.py          # FastAPI app factory (_create_app), lifespan, CORS, auth wiring
+│   ├── config.py        # Pydantic settings (VDL2_* env vars, lru_cache)
+│   ├── database.py      # SQLAlchemy ORM models, thread-safe engine factory, get_session()
 │   ├── models.py        # Shared ORM query helper (query_messages)
 │   ├── schemas.py       # Pydantic response models
-│   ├── collector.py     # JSONL spool tailer, checkpoint, rotation, retention
-│   ├── parser.py        # dumpvdl2 JSON field extraction and hashing
+│   ├── collector.py     # JSONL spool tailer, batch insert, checkpoint, rotation, retention
+│   ├── parser.py        # dumpvdl2 JSON field extraction and SHA-256 hashing
 │   ├── auth.py          # X-API-Key authentication dependency
 │   └── routes/
-│       ├── messages.py
-│       ├── aircraft.py
-│       ├── stats.py
-│       └── health.py
+│       ├── messages.py  # GET /messages, GET /messages/latest
+│       ├── aircraft.py  # GET /aircraft, GET /aircraft/{icao}/messages
+│       ├── stats.py     # GET /stats
+│       └── health.py    # GET /health
+├── scripts/
+│   ├── install.sh       # Full installation script (idempotent)
+│   └── update.sh        # Git pull + dependency update + service restart
 ├── systemd/
 │   ├── dumpvdl2.service
 │   └── vdl2-api.service
 ├── tests/
 │   ├── fixtures/
 │   │   └── sample_messages.jsonl
-│   ├── test_database.py
-│   ├── test_parser.py
-│   ├── test_collector.py
-│   ├── test_api.py
-│   └── test_auth.py
+│   ├── conftest.py      # Test isolation notes
+│   ├── test_database.py # Schema, WAL mode, uniqueness constraints (4 tests)
+│   ├── test_parser.py   # Field extraction, hashing, malformed input (12 tests)
+│   ├── test_collector.py # Drain, checkpoint, rotation, retention (11 tests)
+│   ├── test_api.py      # All endpoints, cursor, filters, pagination (19 tests)
+│   ├── test_auth.py     # Authentication enabled/disabled (5 tests)
+│   └── test_cors.py     # CORS middleware configuration (3 tests)
 ├── AGENTS.md            # AI agent context
 ├── CHANGELOG.md
 ├── CONTRIBUTING.md
@@ -379,7 +426,7 @@ sequenceDiagram
     SDR->>DV: raw RF
     DV->>SP: decoded JSON line
     COL->>SP: readline() + tell()
-    COL->>DB: INSERT OR IGNORE (message_hash)
+    COL->>DB: INSERT OR IGNORE batch (message_hash)
     COL->>DB: UPDATE collector_state (byte_offset)
     CLI->>API: GET /messages?after_id=N
     API->>DB: SELECT WHERE id > N
@@ -389,10 +436,10 @@ sequenceDiagram
 
 Key reliability properties:
 
-- The collector checkpoints its byte offset after every line, so a restart resumes exactly where it left off.
-- `INSERT OR IGNORE` on `message_hash` prevents duplicates if the spool is replayed.
+- The collector reads all available lines into a batch, then commits in a single session. The checkpoint is saved after the batch succeeds. A crash mid-drain re-processes from the last checkpoint — `INSERT OR IGNORE` on `message_hash` makes that safe.
 - The API cursor is a monotonically increasing database `id`, not a timestamp. A client that stops polling for an hour simply resumes from its last `last_id`.
 - Messages are retained for 30 days (configurable) regardless of whether any client has fetched them.
+- On shutdown, the collector thread is signalled via a `threading.Event` and joined with a 10-second timeout before the process exits.
 
 ---
 
@@ -412,7 +459,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 This project was developed with the assistance of [Amazon Q Developer](https://aws.amazon.com/q/developer/), an AI coding assistant built by AWS. The architecture, implementation, tests, and documentation were produced through an iterative conversation between the author and the AI — the author directed requirements, reviewed all output, and made all final decisions.
 
-The use of AI tooling is disclosed here in the spirit of transparency. The code has been reviewed, tested (48 automated tests), and is the responsibility of the project maintainer.
+The use of AI tooling is disclosed here in the spirit of transparency. The code has been reviewed, tested (54 automated tests), and is the responsibility of the project maintainer.
 
 ---
 

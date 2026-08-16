@@ -26,32 +26,43 @@ ACARS, CPDLC, ADS-C, and other operational messages with ground stations.
 
 ```
 app/
-  main.py        — FastAPI app factory, lifespan (collector + cleanup threads), CORS, auth
-  config.py      — All settings via VDL2_* env vars (pydantic-settings)
-  database.py    — SQLAlchemy ORM models (Message, CollectorState), engine factory, get_session()
+  main.py        — FastAPI app factory (_create_app), lifespan, CORS, auth wiring
+  config.py      — All settings via VDL2_* env vars (pydantic-settings, lru_cache)
+  database.py    — SQLAlchemy ORM models (Message, CollectorState), thread-safe
+                   engine factory (_factories_lock), get_session() context manager
   models.py      — query_messages() — the single shared ORM query helper used by routes
   schemas.py     — Pydantic response models (MessageOut, MessagesResponse, etc.)
-  parser.py      — Extracts fields from raw dumpvdl2 JSON; produces dicts for DB insertion
-  collector.py   — Tails the JSONL spool, checkpoints byte offset, inserts into DB
-  auth.py        — Optional X-API-Key authentication dependency
+  parser.py      — Extracts fields from raw dumpvdl2 JSON; SHA-256 hash of raw_json
+  collector.py   — Tails the JSONL spool, batch inserts, checkpoints byte offset,
+                   detects hourly rotation, runs retention cleanup
+  auth.py        — Optional X-API-Key authentication dependency; logs auth failures
   routes/
-    messages.py  — GET /api/v1/messages, GET /api/v1/messages/latest
+    messages.py  — GET /api/v1/messages (since/until validated as datetime), /latest
     aircraft.py  — GET /api/v1/aircraft, GET /api/v1/aircraft/{icao}/messages
     stats.py     — GET /api/v1/stats
     health.py    — GET /api/v1/health
 
-tests/
-  fixtures/
-    sample_messages.jsonl  — Representative dumpvdl2 JSON lines for testing
-  test_parser.py     — Unit tests for parser.py
-  test_database.py   — Schema, WAL mode, uniqueness constraints
-  test_collector.py  — Drain, checkpoint, deduplication, retention, restart recovery
-  test_api.py        — Full API integration tests via FastAPI TestClient
-  test_auth.py       — Authentication enabled/disabled behaviour
+scripts/
+  install.sh     — Full installation (checks deps, creates user, copies files,
+                   creates venv, installs units). Idempotent.
+  update.sh      — git pull + pip install + unit update + service restart + health check
 
 systemd/
   dumpvdl2.service   — Runs dumpvdl2, writes JSONL spool
-  vdl2-api.service   — Runs the Python API + collector
+  vdl2-api.service   — Runs the Python API + collector (After=dumpvdl2.service)
+
+tests/
+  fixtures/
+    sample_messages.jsonl  — Representative dumpvdl2 JSON lines (4 messages,
+                             multiple protocol variants)
+  conftest.py        — Documents test isolation approach and known gaps
+  test_parser.py     — 12 tests: field extraction, hashing, malformed input
+  test_database.py   —  4 tests: schema, WAL mode, uniqueness, autoincrement
+  test_collector.py  — 11 tests: drain, checkpoint, rotation, retention, restart
+  test_api.py        — 19 tests: all endpoints, cursor, filters, since/until validation
+  test_auth.py       —  5 tests: auth enabled/disabled, missing/invalid key
+  test_cors.py       —  3 tests: CORS middleware configuration
+                     — 54 tests total
 ```
 
 ---
@@ -69,16 +80,25 @@ everything after it. This means:
 - Multiple independent clients can read the same messages.
 - Messages are never deleted because a client hasn't fetched them.
 
-Do not change this to a timestamp-based window without understanding the
-implications for client reliability.
+**Do not change this to a timestamp-based window** without understanding
+the implications for client reliability.
 
 ### JSONL spool as ingestion buffer
 
 `dumpvdl2` writes decoded JSON to an append-only JSONL file. The Python
-collector tails this file using `readline()` + `tell()` (not `for line in
-fh`, which disables `tell()`). The byte offset is checkpointed to the
-`collector_state` table after every line. On restart, the collector seeks
-to the last saved offset.
+collector tails this file using `readline()` + `tell()` — **not** `for
+line in fh`, which disables `tell()`. The byte offset is checkpointed to
+the `collector_state` table after each successful batch. On restart, the
+collector seeks to the last saved offset.
+
+### Batch inserts in drain()
+
+`drain()` reads all available lines into a list, then inserts the entire
+batch in a single `session.commit()`. This keeps the commit count at one
+per poll cycle, which matters on a Raspberry Pi SD card. The trade-off is
+that a crash mid-drain re-processes from the last checkpoint — `INSERT OR
+IGNORE` on `message_hash` makes that safe. See the docstring in
+`collector.py` for the memory bound discussion.
 
 ### Duplicate protection
 
@@ -99,7 +119,16 @@ The project uses SQLAlchemy ORM (not Core). The two mapped classes are
 `Message` and `CollectorState` in `app/database.py`. All queries go
 through `get_session()`, a context manager that commits on exit and rolls
 back on exception. The session factory is per-database-path and protected
-by a `threading.Lock`.
+by a `threading.Lock` (`_factories_lock`).
+
+### App construction
+
+The FastAPI app is built inside `_create_app()` rather than at module
+scope. This defers `get_settings()` until `_create_app()` runs, which
+means tests can patch `get_settings` before the app is constructed. The
+module-level `app = _create_app()` is the production singleton. CORS
+middleware is applied during construction, not at request time — CORS
+tests must call `_create_app()` inside the patch context.
 
 ### Settings
 
@@ -107,13 +136,22 @@ All configuration is via `VDL2_*` environment variables. The `Settings`
 class in `app/config.py` uses pydantic-settings. `get_settings()` is
 decorated with `@lru_cache` — in tests, patch `get_settings` at the
 module level where it is used (e.g. `app.routes.messages.get_settings`),
-not at `app.config.get_settings`.
+not at `app.config.get_settings`. See `tests/conftest.py` for details.
 
 ### Authentication
 
 Optional. Set `VDL2_API_KEY` to a non-empty string to require
 `X-API-Key: <value>` on all requests. When empty, all requests are
 allowed. The dependency is applied at the router level in `main.py`.
+Auth failures are logged at WARNING with the reason (missing vs invalid)
+but never the key value.
+
+### Graceful shutdown
+
+`run_collector()` accepts a `stop_event: threading.Event`. The lifespan
+sets the event after `yield`, then joins the collector thread with a
+10-second timeout. If the join times out, the daemon flag kills the thread
+on process exit — the WAL journal and `INSERT OR IGNORE` make this safe.
 
 ---
 
@@ -185,9 +223,10 @@ pip install -r requirements-dev.txt
 pytest -v
 ```
 
-Tests use `tmp_path` fixtures for isolated SQLite databases. No external
-services are required. The FastAPI TestClient is used for API tests with
-`get_settings` and `get_session` patched to point at the test database.
+54 tests. Tests use `tmp_path` fixtures for isolated SQLite databases. No
+external services are required. The FastAPI `TestClient` is used for API
+tests with `get_settings` and `get_session` patched to point at the test
+database.
 
 ---
 
@@ -216,4 +255,9 @@ services are required. The FastAPI TestClient is used for API tests with
 - **The collector runs in a daemon thread.** Do not introduce blocking
   calls into the FastAPI event loop from the collector.
 - **`get_settings()` is `lru_cache`'d.** In tests, patch the reference
-  at the point of use, not at `app.config`.
+  at the point of use, not at `app.config`. See `tests/conftest.py`.
+- **CORS tests must use `_create_app()`.** The module-level `app` singleton
+  has CORS configured from the real settings. Tests that need different
+  CORS origins must call `_create_app()` inside the patch context.
+- **`since`/`until` are validated as `datetime`.** FastAPI returns 422 for
+  malformed values. Do not change these back to `str`.

@@ -29,7 +29,7 @@ source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r requirements-dev.txt
 ```
 
-You do not need a physical RTL-SDR or a running `dumpvdl2` instance to work on the application. The collector reads from a JSONL file; the test suite uses temporary files and an in-memory SQLite database.
+You do not need a physical RTL-SDR or a running `dumpvdl2` instance to work on the application. The collector reads from a JSONL file; the test suite uses temporary files and isolated SQLite databases.
 
 ---
 
@@ -39,14 +39,18 @@ You do not need a physical RTL-SDR or a running `dumpvdl2` instance to work on t
 pytest -v
 ```
 
-All tests must pass before a pull request will be merged. The test suite covers:
+54 tests across 6 files. All must pass before a pull request will be merged.
 
-- JSON parsing and field extraction (`tests/test_parser.py`)
-- Database schema, WAL mode, and uniqueness constraints (`tests/test_database.py`)
-- Collector spool tailing, checkpointing, deduplication, and retention (`tests/test_collector.py`)
-- All REST API endpoints, cursor behaviour, filtering, and authentication (`tests/test_api.py`, `tests/test_auth.py`)
+| File | What it covers |
+|---|---|
+| `tests/test_parser.py` | JSON field extraction, timestamp normalisation, hashing, malformed input |
+| `tests/test_database.py` | Schema creation, WAL mode, uniqueness constraints, autoincrement |
+| `tests/test_collector.py` | Drain batching, checkpointing, deduplication, rotation detection, retention |
+| `tests/test_api.py` | All endpoints, cursor behaviour, filters, pagination, since/until validation |
+| `tests/test_auth.py` | Authentication enabled/disabled, missing/invalid key |
+| `tests/test_cors.py` | CORS middleware configuration, allowed/disallowed origins |
 
-To run a specific test file:
+To run a specific file:
 
 ```bash
 pytest tests/test_collector.py -v
@@ -80,7 +84,16 @@ All response shapes are defined as Pydantic models in `app/schemas.py`. Do not r
 
 ### The collector
 
-The collector (`app/collector.py`) runs in a background thread. It must never crash the process — all errors must be caught, logged, and recovered from. The `drain()` function is the core loop; keep it simple and testable in isolation.
+The collector (`app/collector.py`) runs in a background thread. It must never crash the process — all errors must be caught, logged, and recovered from. The `drain()` function reads all available lines into a list and inserts them in a single session commit. Keep it simple and testable in isolation.
+
+### Logging
+
+- Operational events: `INFO`
+- Security events (auth failures): `WARNING`
+- Errors: `ERROR`
+- High-frequency per-message detail: `DEBUG`
+
+Do not log at `INFO` inside tight loops. The collector logs inserted/duplicate counts at `DEBUG`.
 
 ### Commit messages
 
@@ -92,7 +105,7 @@ type(scope): short description
 Longer explanation if needed. Wrap at 72 characters.
 ```
 
-Types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`.
+Types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`.
 
 ---
 
