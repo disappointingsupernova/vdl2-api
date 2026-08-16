@@ -37,7 +37,9 @@ def _now_iso() -> str:
 def load_offset(db_path: str, spool_path: str) -> int:
     with get_session(db_path) as session:
         state = session.get(CollectorState, spool_path)
-    return state.byte_offset if state else 0
+    offset = state.byte_offset if state else 0
+    log.debug("Loaded checkpoint offset=%d for %s", offset, spool_path)
+    return offset
 
 
 def save_offset(db_path: str, spool_path: str, offset: int) -> None:
@@ -61,6 +63,7 @@ def save_offset(db_path: str, spool_path: str, offset: int) -> None:
 def drain(fh, db_path: str, spool_path: str) -> int:
     """Read all complete lines from fh, insert into DB, return lines inserted."""
     records: list[dict] = []
+    parse_errors = 0
     final_offset = fh.tell()
 
     while True:
@@ -73,24 +76,37 @@ def drain(fh, db_path: str, spool_path: str) -> int:
             continue
         record = parse_message(line)
         if record is None:
+            parse_errors += 1
             final_offset = fh.tell()
             continue
         records.append(record)
         final_offset = fh.tell()
 
+    if parse_errors:
+        log.warning("Skipped %d unparseable line(s) in %s", parse_errors, spool_path)
+
     if not records:
         return 0
 
     inserted = 0
+    duplicates = 0
     try:
         with get_session(db_path) as session:
             for record in records:
                 stmt = sqlite_insert(Message).values(**record).prefix_with("OR IGNORE")
                 result = session.execute(stmt)
-                inserted += result.rowcount
+                if result.rowcount:
+                    inserted += 1
+                else:
+                    duplicates += 1
     except SQLAlchemyError as exc:
-        log.error("DB insert error: %s", exc)
+        log.error("DB insert error after reading %d record(s): %s", len(records), exc)
         return inserted
+
+    if inserted:
+        log.debug("Inserted %d message(s), skipped %d duplicate(s)", inserted, duplicates)
+    if duplicates and not inserted:
+        log.debug("All %d message(s) were duplicates — spool replay?", duplicates)
 
     save_offset(db_path, spool_path, final_offset)
     return inserted
@@ -123,11 +139,12 @@ def run_collector(
     spool = spool_path or settings.spool
     db = db_path or settings.database
 
-    log.info("Collector starting — spool=%s db=%s", spool, db)
+    log.info("Collector starting — spool=%s db=%s poll_interval=%.1fs", spool, db, poll_interval)
 
     fh = None
     current_inode: int | None = None
     iterations = 0
+    spool_missing_logged = False
 
     try:
         while not (stop_event and stop_event.is_set()):
@@ -138,8 +155,12 @@ def run_collector(
 
             if fh is None:
                 if not os.path.exists(spool):
+                    if not spool_missing_logged:
+                        log.warning("Spool file not found — waiting: %s", spool)
+                        spool_missing_logged = True
                     time.sleep(poll_interval)
                     continue
+                spool_missing_logged = False
                 offset = load_offset(db, spool)
                 try:
                     fh = open(spool, "r", encoding="utf-8", errors="replace")
@@ -149,12 +170,17 @@ def run_collector(
                     continue
                 fh.seek(offset)
                 current_inode = _inode(spool)
-                log.info("Opened spool at offset %d (inode %s)", offset, current_inode)
+                log.info("Opened spool at byte offset %d (inode %s)", offset, current_inode)
 
             live_inode = _inode(spool)
             if live_inode is not None and live_inode != current_inode:
-                log.info("Rotation detected — draining old file")
-                drain(fh, db, fh.name)
+                log.info(
+                    "Rotation detected — inode changed %s → %s; draining old file",
+                    current_inode, live_inode,
+                )
+                n = drain(fh, db, fh.name)
+                if n:
+                    log.info("Drained %d message(s) from rotated file", n)
                 fh.close()
                 fh = None
                 current_inode = None
@@ -162,15 +188,16 @@ def run_collector(
 
             n = drain(fh, db, spool)
             if n:
-                log.debug("Inserted %d message(s)", n)
+                log.debug("Poll cycle: inserted %d message(s)", n)
 
             time.sleep(poll_interval)
 
     except KeyboardInterrupt:
-        log.info("Collector stopped")
+        log.info("Collector stopped by keyboard interrupt")
     finally:
         if fh:
             fh.close()
+        log.info("Collector shut down")
 
 
 # ---------------------------------------------------------------------------
@@ -184,10 +211,15 @@ def purge_old_messages(db_path: str | None = None, retention_days: int | None = 
     cutoff = (
         datetime.now(tz=timezone.utc) - timedelta(days=days)
     ).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    log.debug("Running retention cleanup — cutoff=%s (%d days)", cutoff, days)
     with get_session(db) as session:
         deleted = (
             session.query(Message)
             .filter(Message.inserted_at < cutoff)
             .delete(synchronize_session=False)
         )
-        return deleted
+    if deleted:
+        log.info("Retention cleanup: removed %d message(s) older than %d days", deleted, days)
+    else:
+        log.debug("Retention cleanup: no messages older than %d days", days)
+    return deleted

@@ -24,6 +24,25 @@ log = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
+
+    log.info(
+        "VDL2 API starting — host=%s port=%d db=%s spool=%s retention=%dd",
+        settings.api_host,
+        settings.api_port,
+        settings.database,
+        settings.spool,
+        settings.retention_days,
+    )
+    if settings.api_key:
+        log.info("Authentication: X-API-Key required")
+    else:
+        log.warning("Authentication: disabled — set VDL2_API_KEY to require a key")
+
+    if settings.cors_origins:
+        log.info("CORS: allowed origins — %s", ", ".join(settings.cors_origins))
+    else:
+        log.info("CORS: disabled")
+
     init_db(settings.database)
 
     stop_event = threading.Event()
@@ -44,11 +63,10 @@ async def lifespan(app: FastAPI):
             stop_event.wait(timeout=3600)
             if stop_event.is_set():
                 break
-            deleted = purge_old_messages()
-            if deleted:
-                log.info("Retention cleanup: removed %d message(s)", deleted)
+            purge_old_messages()
 
     threading.Thread(target=_cleanup, daemon=True, name="retention").start()
+    log.info("Retention cleanup thread started — interval=1h retention=%dd", settings.retention_days)
 
     yield
 
@@ -56,7 +74,9 @@ async def lifespan(app: FastAPI):
     stop_event.set()
     collector_thread.join(timeout=10)
     if collector_thread.is_alive():
-        log.warning("Collector thread did not stop within 10 s")
+        log.warning("Collector thread did not stop within 10 s — forcing exit")
+    else:
+        log.info("Collector thread stopped cleanly")
 
 
 def _create_app() -> FastAPI:

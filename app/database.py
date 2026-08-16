@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import threading
 from contextlib import contextmanager
 from typing import Generator
@@ -8,6 +9,8 @@ from sqlalchemy import Index, Integer, String, UniqueConstraint, create_engine, 
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 from app.config import get_settings
+
+log = logging.getLogger(__name__)
 
 
 class Base(DeclarativeBase):
@@ -81,6 +84,7 @@ def _get_factory(db_path: str) -> sessionmaker:
         if db_path not in _factories:
             engine = _make_engine(db_path)
             _factories[db_path] = sessionmaker(bind=engine, expire_on_commit=False)
+            log.debug("Created database engine for %s", db_path)
         return _factories[db_path]
 
 
@@ -88,6 +92,7 @@ def init_db(db_path: str | None = None) -> None:
     path = db_path or get_settings().database
     factory = _get_factory(path)
     Base.metadata.create_all(factory.kw["bind"])
+    log.info("Database initialised — path=%s", path)
 
 
 @contextmanager

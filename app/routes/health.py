@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 from sqlalchemy import func
@@ -10,6 +11,7 @@ from app.config import get_settings
 from app.database import Message, get_session
 from app.schemas import HealthResponse
 
+log = logging.getLogger(__name__)
 router = APIRouter()
 
 collector_running: bool = False
@@ -40,7 +42,8 @@ async def health() -> HealthResponse:
                     age_seconds = (datetime.now(tz=timezone.utc) - dt).total_seconds()
                 except ValueError:
                     pass
-    except Exception:
+    except Exception as exc:
+        log.error("Health check DB query failed: %s", exc)
         db_status = "error"
 
     return HealthResponse(
