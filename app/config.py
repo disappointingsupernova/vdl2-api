@@ -22,7 +22,6 @@ class Settings(BaseSettings):
     # Paths
     database: str = "/var/lib/vdl2/vdl2.db"
     spool: str = "/var/lib/vdl2/messages.jsonl"
-    state: str = "/var/lib/vdl2/collector.state"
 
     # Retention
     retention_days: int = 30

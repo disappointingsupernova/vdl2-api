@@ -17,7 +17,6 @@ def auth_client(tmp_path):
     test_settings = Settings(
         database=db,
         spool=str(tmp_path / "messages.jsonl"),
-        state=str(tmp_path / "collector.state"),
         api_key="test-secret-key",
     )
 
@@ -69,7 +68,6 @@ def test_no_key_configured_allows_all(tmp_path):
     test_settings = Settings(
         database=db,
         spool=str(tmp_path / "messages.jsonl"),
-        state=str(tmp_path / "collector.state"),
         api_key="",
     )
 
