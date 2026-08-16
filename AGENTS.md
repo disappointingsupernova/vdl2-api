@@ -43,8 +43,10 @@ app/
     health.py    — GET /api/v1/health
 
 scripts/
-  install.sh     — Full installation (checks deps, creates user, copies files,
-                   creates venv, installs units). Idempotent.
+  install.sh     — Full installation (checks deps including Python 3.11-3.13
+                   version gate, creates user, creates venv, installs units).
+                   Respects PYTHON env var: PYTHON=python3.12 sudo -E bash scripts/install.sh
+                   Idempotent.
   update.sh      — git pull + pip install + unit update + service restart + health check
 
 systemd/
@@ -261,3 +263,7 @@ database.
   CORS origins must call `_create_app()` inside the patch context.
 - **`since`/`until` are validated as `datetime`.** FastAPI returns 422 for
   malformed values. Do not change these back to `str`.
+- **Python 3.11–3.13 only.** `pydantic-core` uses PyO3 which has a hard
+  maximum of Python 3.13. The install script enforces this. On Ubuntu
+  26.04 (system Python 3.14), use the deadsnakes PPA and pass
+  `PYTHON=python3.12 sudo -E bash scripts/install.sh`.
