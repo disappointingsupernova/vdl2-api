@@ -127,7 +127,12 @@ def run_collector(
                     time.sleep(poll_interval)
                     continue
                 offset = load_offset(db, spool)
-                fh = open(spool, "r", encoding="utf-8", errors="replace")
+                try:
+                    fh = open(spool, "r", encoding="utf-8", errors="replace")
+                except OSError as exc:
+                    log.error("Cannot open spool %s: %s — retrying", spool, exc)
+                    time.sleep(poll_interval)
+                    continue
                 fh.seek(offset)
                 current_inode = _inode(spool)
                 log.info("Opened spool at offset %d (inode %s)", offset, current_inode)
