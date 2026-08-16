@@ -10,13 +10,14 @@
 #
 # What this script does:
 #   1. Verifies the installation and required tools exist
-#   2. Stops the vdl2-api service gracefully
+#   2. Stops both services gracefully
 #   3. Backs up the current .env and database
 #   4. Pulls the latest code from git (origin/main)
 #   5. Updates Python dependencies
 #   6. Reinstalls systemd units if they have changed
-#   7. Restarts the service
-#   8. Verifies the service came back up healthy
+#   7. Restarts both services (dumpvdl2 first, then vdl2-api)
+#   8. Verifies vdl2-api came back up healthy
+#   9. Validates dumpvdl2 is running and has the spool file open
 #
 # The database and .env are never overwritten.
 # =============================================================================
@@ -87,9 +88,9 @@ done
 echo ""
 
 # ---------------------------------------------------------------------------
-# Step 2: Stop the service
+# Step 2: Stop both services
 # ---------------------------------------------------------------------------
-info "Stopping vdl2-api.service..."
+info "Stopping services..."
 
 if systemctl is-active --quiet vdl2-api.service; then
     systemctl stop vdl2-api.service
@@ -98,8 +99,13 @@ else
     ok "  vdl2-api.service was not running"
 fi
 
-# Leave dumpvdl2 running — it writes to the spool independently and the
-# collector will catch up when the API restarts.
+if systemctl is-active --quiet dumpvdl2.service; then
+    systemctl stop dumpvdl2.service
+    ok "  dumpvdl2.service stopped"
+else
+    ok "  dumpvdl2.service was not running"
+fi
+
 echo ""
 
 # ---------------------------------------------------------------------------
@@ -212,8 +218,16 @@ fi
 echo ""
 
 # ---------------------------------------------------------------------------
-# Step 7: Restart the service
+# Step 7: Restart both services
 # ---------------------------------------------------------------------------
+info "Starting dumpvdl2.service..."
+
+systemctl start dumpvdl2.service
+ok "  dumpvdl2.service started"
+
+# Brief pause to let dumpvdl2 open the spool file before the collector starts
+sleep 2
+
 info "Starting vdl2-api.service..."
 
 systemctl start vdl2-api.service
@@ -242,7 +256,29 @@ until curl --silent --fail "http://localhost:${API_PORT}/api/v1/health" &>/dev/n
 done
 
 if [[ "${ATTEMPTS}" -lt "${MAX_ATTEMPTS}" ]]; then
-    ok "  Service is healthy (responded in ${ATTEMPTS}s)"
+    ok "  vdl2-api is healthy (responded in ${ATTEMPTS}s)"
+fi
+
+# ---------------------------------------------------------------------------
+# Step 9: Validate dumpvdl2
+# ---------------------------------------------------------------------------
+info "Validating dumpvdl2.service..."
+
+if systemctl is-active --quiet dumpvdl2.service; then
+    ok "  dumpvdl2.service is running"
+    # Confirm it has the spool file open
+    DUMPVDL2_PID=$(systemctl show -p MainPID --value dumpvdl2.service)
+    if [[ -n "${DUMPVDL2_PID}" && "${DUMPVDL2_PID}" != "0" ]]; then
+        SPOOL_OPEN=$(ls -la /proc/${DUMPVDL2_PID}/fd 2>/dev/null | grep messages.jsonl || true)
+        if [[ -n "${SPOOL_OPEN}" ]]; then
+            ok "  dumpvdl2 has spool file open for writing"
+        else
+            warn "  dumpvdl2 is running but spool file not yet open (may still be starting)"
+        fi
+    fi
+else
+    warn "  dumpvdl2.service is not running"
+    warn "  Check: journalctl -u dumpvdl2.service -n 50"
 fi
 
 echo ""
@@ -258,8 +294,10 @@ echo "  Backup saved to: ${BACKUP_PATH}"
 echo "  Now running:     $(git -C "${INSTALL_DIR}" rev-parse --short HEAD)"
 echo ""
 echo "  Service status:"
+echo "    sudo systemctl status dumpvdl2.service"
 echo "    sudo systemctl status vdl2-api.service"
 echo "    journalctl -u vdl2-api.service -f"
+echo "    journalctl -u dumpvdl2.service -f"
 echo ""
 echo "  API health:"
 echo "    curl http://localhost:${API_PORT}/api/v1/health"
