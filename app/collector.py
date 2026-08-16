@@ -61,7 +61,19 @@ def save_offset(db_path: str, spool_path: str, offset: int) -> None:
 # ---------------------------------------------------------------------------
 
 def drain(fh, db_path: str, spool_path: str) -> int:
-    """Read all complete lines from fh, insert into DB, return lines inserted."""
+    """
+    Read all available lines from fh, insert into DB in a single session,
+    return the number of new messages inserted.
+
+    All lines are read into memory before the DB session opens. This keeps
+    the commit count at one per poll cycle, which matters on a Raspberry Pi
+    SD card. The trade-off is that a very large catch-up (e.g. after a long
+    outage) could hold tens of thousands of raw JSON strings in RAM before
+    the first commit. On a Pi with 1–2 GB RAM this is unlikely to be a
+    problem in practice — a typical VDL2 message is ~300–500 bytes, so
+    10,000 messages ≈ 5 MB. If memory ever becomes a concern, introduce a
+    DRAIN_CHUNK_SIZE constant and flush every N records.
+    """
     records: list[dict] = []
     parse_errors = 0
     final_offset = fh.tell()
