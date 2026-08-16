@@ -122,6 +122,20 @@ def test_rotation_drains_old_file_and_switches_to_new(env, tmp_path):
     We mock _inode to control when rotation appears to occur, and intercept
     the drain-of-old-file call to write the new spool content at the right
     moment. Both pre- and post-rotation messages must end up in the database.
+
+    Platform note — Windows vs Linux:
+    On Linux (production), dumpvdl2 renames the spool file and creates a new
+    one. The inode of the path changes, the collector drains the old open
+    file handle (which remains valid after rename), then reopens the path.
+    This test mocks _inode() to simulate the inode change and uses content
+    replacement + checkpoint reset as a stand-in for the rename, because
+    Windows locks open files and os.rename() raises PermissionError.
+
+    The mock covers the detection and reopen logic correctly. The one path
+    not exercised on Windows is draining a renamed file via its old handle
+    after the path has been replaced — that requires an actual rename and
+    is best covered by a CI job running on Linux (e.g. GitHub Actions ubuntu
+    runner), where os.rename() works on open files.
     """
     from unittest.mock import patch as mock_patch
     from app.collector import drain as real_drain
