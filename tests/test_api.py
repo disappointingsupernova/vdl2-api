@@ -155,6 +155,16 @@ def test_until_filter(client):
     assert body["messages"][0]["id"] == 1
 
 
+def test_since_malformed_returns_422(client):
+    r = client.get("/api/v1/messages?since=not-a-date")
+    assert r.status_code == 422
+
+
+def test_until_malformed_returns_422(client):
+    r = client.get("/api/v1/messages?until=yesterday")
+    assert r.status_code == 422
+
+
 # ---------------------------------------------------------------------------
 # /api/v1/messages/latest
 # ---------------------------------------------------------------------------

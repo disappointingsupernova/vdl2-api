@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Query
@@ -11,12 +12,19 @@ from app.schemas import MessagesResponse
 router = APIRouter()
 
 
+def _iso(dt: datetime | None) -> str | None:
+    """Serialise a validated datetime back to the ISO 8601 string the ORM expects."""
+    if dt is None:
+        return None
+    return dt.strftime("%Y-%m-%dT%H:%M:%S.") + f"{dt.microsecond // 1000:03d}Z"
+
+
 @router.get("/messages", response_model=MessagesResponse, summary="List messages by cursor")
 async def list_messages(
     after_id: int = Query(0, ge=0, description="Return messages with id > this value"),
     limit: int = Query(500, ge=1, le=5000),
-    since: Optional[str] = Query(None, description="ISO 8601 UTC lower bound on received_at"),
-    until: Optional[str] = Query(None, description="ISO 8601 UTC upper bound on received_at"),
+    since: Optional[datetime] = Query(None, description="ISO 8601 UTC lower bound on received_at"),
+    until: Optional[datetime] = Query(None, description="ISO 8601 UTC upper bound on received_at"),
     icao: Optional[str] = Query(None, description="Filter by source or destination ICAO"),
     frequency: Optional[int] = Query(None, description="Filter by frequency in Hz"),
 ) -> MessagesResponse:
@@ -28,8 +36,8 @@ async def list_messages(
         settings.database,
         after_id=after_id,
         limit=fetch_limit,
-        since=since,
-        until=until,
+        since=_iso(since),
+        until=_iso(until),
         icao=icao,
         frequency=frequency,
     )
