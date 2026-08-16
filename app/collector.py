@@ -11,18 +11,19 @@ from __future__ import annotations
 
 import logging
 import os
-import sqlite3
 import time
 from datetime import datetime, timezone
-from pathlib import Path
+
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 from .config import get_settings
-from .database import get_connection, get_cursor, init_db
+from .database import get_conn, init_db
 from .parser import parse_message
 
 log = logging.getLogger(__name__)
 
-_INSERT_SQL = """
+_INSERT_SQL = text("""
     INSERT OR IGNORE INTO messages
         (received_at, received_at_epoch_ms, station_id, frequency_hz,
          source_icao, destination_icao, direction, message_type,
@@ -33,7 +34,15 @@ _INSERT_SQL = """
          :source_icao, :destination_icao, :direction, :message_type,
          :aircraft_registration, :flight_id, :message_text, :raw_json,
          :inserted_at, :message_hash)
-"""
+""")
+
+_UPSERT_OFFSET = text("""
+    INSERT INTO collector_state (spool_path, byte_offset, updated_at)
+    VALUES (:spool_path, :byte_offset, :updated_at)
+    ON CONFLICT(spool_path) DO UPDATE SET
+        byte_offset = excluded.byte_offset,
+        updated_at  = excluded.updated_at
+""")
 
 
 def _now_iso() -> str:
@@ -46,27 +55,21 @@ def _now_iso() -> str:
 # ---------------------------------------------------------------------------
 
 def load_offset(db_path: str, spool_path: str) -> int:
-    conn = get_connection(db_path)
-    row = conn.execute(
-        "SELECT byte_offset FROM collector_state WHERE spool_path = ?",
-        (spool_path,),
-    ).fetchone()
+    with get_conn(db_path) as conn:
+        row = conn.execute(
+            text("SELECT byte_offset FROM collector_state WHERE spool_path = :p"),
+            {"p": spool_path},
+        ).fetchone()
     return row[0] if row else 0
 
 
 def save_offset(db_path: str, spool_path: str, offset: int) -> None:
-    conn = get_connection(db_path)
-    conn.execute(
-        """
-        INSERT INTO collector_state (spool_path, byte_offset, updated_at)
-        VALUES (?, ?, ?)
-        ON CONFLICT(spool_path) DO UPDATE SET
-            byte_offset = excluded.byte_offset,
-            updated_at  = excluded.updated_at
-        """,
-        (spool_path, offset, _now_iso()),
-    )
-    conn.commit()
+    with get_conn(db_path) as conn:
+        conn.execute(_UPSERT_OFFSET, {
+            "spool_path": spool_path,
+            "byte_offset": offset,
+            "updated_at": _now_iso(),
+        })
 
 
 # ---------------------------------------------------------------------------
@@ -78,7 +81,7 @@ def drain(fh, db_path: str, spool_path: str) -> int:
     inserted = 0
     while True:
         raw_line = fh.readline()
-        if not raw_line:  # EOF
+        if not raw_line:
             break
         line = raw_line.strip()
         if not line:
@@ -89,10 +92,10 @@ def drain(fh, db_path: str, spool_path: str) -> int:
             save_offset(db_path, spool_path, fh.tell())
             continue
         try:
-            with get_cursor(db_path) as cur:
-                cur.execute(_INSERT_SQL, record)
-                inserted += cur.rowcount
-        except sqlite3.Error as exc:
+            with get_conn(db_path) as conn:
+                result = conn.execute(_INSERT_SQL, record)
+                inserted += result.rowcount
+        except SQLAlchemyError as exc:
             log.error("DB insert error: %s", exc)
         save_offset(db_path, spool_path, fh.tell())
     return inserted
@@ -118,7 +121,7 @@ def run_collector(
     db_path: str | None = None,
     poll_interval: float = 1.0,
     *,
-    _stop_after: int | None = None,  # for testing only
+    _stop_after: int | None = None,
 ) -> None:
     settings = get_settings()
     spool = spool_path or settings.spool
@@ -139,11 +142,8 @@ def run_collector(
                     break
                 iterations += 1
 
-            spool_exists = os.path.exists(spool)
-
-            # --- open or reopen file ---
             if fh is None:
-                if not spool_exists:
+                if not os.path.exists(spool):
                     time.sleep(poll_interval)
                     continue
                 offset = load_offset(db, spool)
@@ -152,18 +152,15 @@ def run_collector(
                 current_inode = _inode(spool)
                 log.info("Opened spool at offset %d (inode %s)", offset, current_inode)
 
-            # --- detect rotation ---
             live_inode = _inode(spool)
             if live_inode is not None and live_inode != current_inode:
-                # New file has appeared; drain remainder of old file first
                 log.info("Rotation detected — draining old file")
                 drain(fh, db, fh.name)
                 fh.close()
                 fh = None
                 current_inode = None
-                continue  # reopen on next iteration
+                continue
 
-            # --- drain available lines ---
             n = drain(fh, db, spool)
             if n:
                 log.debug("Inserted %d message(s)", n)
@@ -185,9 +182,9 @@ def purge_old_messages(db_path: str | None = None, retention_days: int | None = 
     settings = get_settings()
     db = db_path or settings.database
     days = retention_days if retention_days is not None else settings.retention_days
-    with get_cursor(db) as cur:
-        cur.execute(
-            "DELETE FROM messages WHERE inserted_at < datetime('now', ?)",
-            (f"-{days} days",),
+    with get_conn(db) as conn:
+        result = conn.execute(
+            text("DELETE FROM messages WHERE inserted_at < datetime('now', :w)"),
+            {"w": f"-{days} days"},
         )
-        return cur.rowcount
+        return result.rowcount

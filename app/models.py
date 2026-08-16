@@ -1,18 +1,16 @@
-"""
-Shared database query helpers used by API routes.
-"""
 from __future__ import annotations
 
 import json
-import sqlite3
 from typing import Any
 
-from .database import get_connection
+from sqlalchemy import text
+
+from .database import get_engine
 from .schemas import AddressSummary, MessageOut
 
 
-def _row_to_message(row: sqlite3.Row) -> MessageOut:
-    raw_json = row["raw_json"] or "{}"
+def _row_to_message(row: Any) -> MessageOut:
+    raw_json = row.raw_json or "{}"
     try:
         raw = json.loads(raw_json)
     except json.JSONDecodeError:
@@ -23,19 +21,19 @@ def _row_to_message(row: sqlite3.Row) -> MessageOut:
     dst = avlc.get("dst") or {}
 
     return MessageOut(
-        id=row["id"],
-        timestamp=row["received_at"],
-        timestamp_ms=row["received_at_epoch_ms"],
-        ingested_at=row["inserted_at"],
-        station_id=row["station_id"],
-        frequency_hz=row["frequency_hz"],
-        source=AddressSummary(icao=row["source_icao"], type=src.get("type")),
-        destination=AddressSummary(icao=row["destination_icao"], type=dst.get("type")),
-        direction=row["direction"],
-        message_type=row["message_type"],
-        aircraft_registration=row["aircraft_registration"],
-        flight_id=row["flight_id"],
-        message_text=row["message_text"],
+        id=row.id,
+        timestamp=row.received_at,
+        timestamp_ms=row.received_at_epoch_ms,
+        ingested_at=row.inserted_at,
+        station_id=row.station_id,
+        frequency_hz=row.frequency_hz,
+        source=AddressSummary(icao=row.source_icao, type=src.get("type")),
+        destination=AddressSummary(icao=row.destination_icao, type=dst.get("type")),
+        direction=row.direction,
+        message_type=row.message_type,
+        aircraft_registration=row.aircraft_registration,
+        flight_id=row.flight_id,
+        message_text=row.message_text,
         raw=raw,
     )
 
@@ -51,7 +49,6 @@ def query_messages(
     frequency: int | None = None,
     order: str = "ASC",
 ) -> list[MessageOut]:
-    conn = get_connection(db_path)
     clauses = ["id > :after_id"]
     params: dict[str, Any] = {"after_id": after_id, "limit": limit}
 
@@ -69,6 +66,9 @@ def query_messages(
         params["frequency"] = frequency
 
     where = " AND ".join(clauses)
-    sql = f"SELECT * FROM messages WHERE {where} ORDER BY id {order} LIMIT :limit"
-    rows = conn.execute(sql, params).fetchall()
+    sql = text(f"SELECT * FROM messages WHERE {where} ORDER BY id {order} LIMIT :limit")
+
+    with get_engine(db_path).connect() as conn:
+        rows = conn.execute(sql, params).mappings().all()
+
     return [_row_to_message(r) for r in rows]

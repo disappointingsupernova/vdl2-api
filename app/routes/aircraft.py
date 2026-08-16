@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Path, Query
 
+from sqlalchemy import text
+
 from ..config import get_settings
-from ..database import get_connection
+from ..database import get_engine
 from ..models import query_messages
 from ..schemas import AircraftListResponse, AircraftSummary, MessagesResponse
 
@@ -41,24 +43,24 @@ async def list_aircraft(
     hours: int = Query(24, ge=1, le=168, description="Lookback window in hours"),
 ) -> AircraftListResponse:
     settings = get_settings()
-    conn = get_connection(settings.database)
-    rows = conn.execute(
-        """
-        SELECT
-            source_icao                          AS icao,
-            MIN(received_at)                     AS first_seen,
-            MAX(received_at)                     AS last_seen,
-            COUNT(*)                             AS message_count,
-            MAX(aircraft_registration)           AS registration,
-            MAX(flight_id)                       AS flight_id
-        FROM messages
-        WHERE source_icao IS NOT NULL
-          AND received_at >= datetime('now', :window)
-        GROUP BY source_icao
-        ORDER BY last_seen DESC
-        """,
-        {"window": f"-{hours} hours"},
-    ).fetchall()
+    with get_engine(settings.database).connect() as conn:
+        rows = conn.execute(
+            text("""
+            SELECT
+                source_icao                          AS icao,
+                MIN(received_at)                     AS first_seen,
+                MAX(received_at)                     AS last_seen,
+                COUNT(*)                             AS message_count,
+                MAX(aircraft_registration)           AS registration,
+                MAX(flight_id)                       AS flight_id
+            FROM messages
+            WHERE source_icao IS NOT NULL
+              AND received_at >= datetime('now', :window)
+            GROUP BY source_icao
+            ORDER BY last_seen DESC
+            """),
+            {"window": f"-{hours} hours"},
+        ).mappings().all()
 
     return AircraftListResponse(
         aircraft=[

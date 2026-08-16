@@ -1,9 +1,8 @@
 import pytest
-import sqlite3
-import tempfile
-import os
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 
-from app.database import init_db, get_connection, get_cursor
+from app.database import init_db, get_engine, get_conn
 
 
 @pytest.fixture
@@ -14,15 +13,17 @@ def db_path(tmp_path):
 
 
 def test_schema_created(db_path):
-    conn = get_connection(db_path)
-    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    with get_engine(db_path).connect() as conn:
+        tables = {r[0] for r in conn.execute(
+            text("SELECT name FROM sqlite_master WHERE type='table'")
+        ).fetchall()}
     assert "messages" in tables
     assert "collector_state" in tables
 
 
 def test_wal_mode(db_path):
-    conn = get_connection(db_path)
-    mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+    with get_engine(db_path).connect() as conn:
+        mode = conn.execute(text("PRAGMA journal_mode")).scalar()
     assert mode == "wal"
 
 
@@ -43,7 +44,7 @@ def test_message_hash_unique(db_path):
         inserted_at="2026-08-16T16:24:09.100Z",
         message_hash="abc123",
     )
-    sql = """
+    sql = text("""
         INSERT INTO messages
             (received_at, received_at_epoch_ms, station_id, frequency_hz,
              source_icao, destination_icao, direction, message_type,
@@ -54,25 +55,24 @@ def test_message_hash_unique(db_path):
              :source_icao, :destination_icao, :direction, :message_type,
              :aircraft_registration, :flight_id, :message_text, :raw_json,
              :inserted_at, :message_hash)
-    """
-    with get_cursor(db_path) as cur:
-        cur.execute(sql, row)
+    """)
+    with get_conn(db_path) as conn:
+        conn.execute(sql, row)
 
-    with pytest.raises(sqlite3.IntegrityError):
-        with get_cursor(db_path) as cur:
-            cur.execute(sql, row)
+    with pytest.raises(IntegrityError):
+        with get_conn(db_path) as conn:
+            conn.execute(sql, row)
 
 
 def test_autoincrement_id(db_path):
-    sql = """
-        INSERT INTO messages
-            (received_at, station_id, raw_json, inserted_at, message_hash)
-        VALUES (?, ?, ?, ?, ?)
-    """
-    with get_cursor(db_path) as cur:
-        cur.execute(sql, ("2026-08-16T16:24:09Z", "s", '{}', "2026-08-16T16:24:09Z", "h1"))
-        cur.execute(sql, ("2026-08-16T16:24:10Z", "s", '{}', "2026-08-16T16:24:10Z", "h2"))
+    sql = text("""
+        INSERT INTO messages (received_at, station_id, raw_json, inserted_at, message_hash)
+        VALUES (:ra, :s, :r, :ia, :h)
+    """)
+    with get_conn(db_path) as conn:
+        conn.execute(sql, {"ra": "2026-08-16T16:24:09Z", "s": "s", "r": "{}", "ia": "2026-08-16T16:24:09Z", "h": "h1"})
+        conn.execute(sql, {"ra": "2026-08-16T16:24:10Z", "s": "s", "r": "{}", "ia": "2026-08-16T16:24:10Z", "h": "h2"})
 
-    conn = get_connection(db_path)
-    ids = [r[0] for r in conn.execute("SELECT id FROM messages ORDER BY id").fetchall()]
+    with get_engine(db_path).connect() as conn:
+        ids = [r[0] for r in conn.execute(text("SELECT id FROM messages ORDER BY id")).fetchall()]
     assert ids == [1, 2]

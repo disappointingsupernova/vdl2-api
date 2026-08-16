@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from sqlalchemy import text
+
 from ..config import get_settings
-from ..database import get_connection
+from ..database import get_engine
 from ..schemas import StatsResponse
 
 router = APIRouter()
@@ -12,35 +14,30 @@ router = APIRouter()
 @router.get("/stats", response_model=StatsResponse, summary="Aggregate message statistics")
 async def stats() -> StatsResponse:
     settings = get_settings()
-    conn = get_connection(settings.database)
+    with get_engine(settings.database).connect() as conn:
+        total = conn.execute(text("SELECT COUNT(*) FROM messages")).scalar()
 
-    total = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+        last_minute = conn.execute(
+            text("SELECT COUNT(*) FROM messages WHERE received_at >= datetime('now', '-1 minute')")
+        ).scalar()
 
-    last_minute = conn.execute(
-        "SELECT COUNT(*) FROM messages WHERE received_at >= datetime('now', '-1 minute')"
-    ).fetchone()[0]
+        last_hour = conn.execute(
+            text("SELECT COUNT(*) FROM messages WHERE received_at >= datetime('now', '-1 hour')")
+        ).scalar()
 
-    last_hour = conn.execute(
-        "SELECT COUNT(*) FROM messages WHERE received_at >= datetime('now', '-1 hour')"
-    ).fetchone()[0]
+        freq_rows = conn.execute(text("""
+            SELECT frequency_hz, COUNT(*) AS cnt
+            FROM messages
+            WHERE frequency_hz IS NOT NULL
+            GROUP BY frequency_hz
+        """)).mappings().all()
+        by_freq = {str(r["frequency_hz"]): r["cnt"] for r in freq_rows}
 
-    freq_rows = conn.execute(
-        """
-        SELECT frequency_hz, COUNT(*) AS cnt
-        FROM messages
-        WHERE frequency_hz IS NOT NULL
-        GROUP BY frequency_hz
-        """
-    ).fetchall()
-    by_freq = {str(r["frequency_hz"]): r["cnt"] for r in freq_rows}
-
-    unique_aircraft = conn.execute(
-        """
-        SELECT COUNT(DISTINCT source_icao) FROM messages
-        WHERE source_icao IS NOT NULL
-          AND received_at >= datetime('now', '-1 hour')
-        """
-    ).fetchone()[0]
+        unique_aircraft = conn.execute(text("""
+            SELECT COUNT(DISTINCT source_icao) FROM messages
+            WHERE source_icao IS NOT NULL
+              AND received_at >= datetime('now', '-1 hour')
+        """)).scalar()
 
     return StatsResponse(
         messages_total=total,

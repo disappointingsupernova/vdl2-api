@@ -9,8 +9,9 @@ from __future__ import annotations
 import pytest
 from unittest.mock import patch
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
-from app.database import init_db, get_connection
+from app.database import init_db, get_engine, get_conn
 from app.config import Settings
 
 
@@ -49,7 +50,7 @@ SAMPLE_ROWS = [
     },
 ]
 
-_INSERT = """
+_INSERT = text("""
     INSERT INTO messages
         (received_at, received_at_epoch_ms, station_id, frequency_hz,
          source_icao, destination_icao, direction, message_type,
@@ -60,17 +61,16 @@ _INSERT = """
          :source_icao, :destination_icao, :direction, :message_type,
          :aircraft_registration, :flight_id, :message_text, :raw_json,
          :inserted_at, :message_hash)
-"""
+""")
 
 
 @pytest.fixture
 def client(tmp_path):
     db = str(tmp_path / "test.db")
     init_db(db)
-    conn = get_connection(db)
-    for row in SAMPLE_ROWS:
-        conn.execute(_INSERT, row)
-    conn.commit()
+    with get_conn(db) as conn:
+        for row in SAMPLE_ROWS:
+            conn.execute(_INSERT, row)
 
     test_settings = Settings(
         database=db,
@@ -81,28 +81,22 @@ def client(tmp_path):
     def _settings():
         return test_settings
 
-    def _conn(path=None):
-        return get_connection(db)
-
-    def _noop_init(path=None):
-        pass  # DB already initialised above
-
-    def _noop_collector(**_kwargs):
-        pass  # don't start background threads in tests
+    def _engine(path=None):
+        return get_engine(db)
 
     from app.main import app
     with patch("app.main.get_settings", _settings), \
-         patch("app.main.init_db", _noop_init), \
-         patch("app.main.run_collector", _noop_collector), \
+         patch("app.main.init_db", lambda path=None: None), \
+         patch("app.main.run_collector", lambda **_: None), \
          patch("app.main.purge_old_messages", lambda **_: 0), \
          patch("app.routes.messages.get_settings", _settings), \
          patch("app.routes.aircraft.get_settings", _settings), \
          patch("app.routes.stats.get_settings", _settings), \
          patch("app.routes.health.get_settings", _settings), \
-         patch("app.models.get_connection", _conn), \
-         patch("app.routes.aircraft.get_connection", _conn), \
-         patch("app.routes.stats.get_connection", _conn), \
-         patch("app.routes.health.get_connection", _conn):
+         patch("app.models.get_engine", _engine), \
+         patch("app.routes.aircraft.get_engine", _engine), \
+         patch("app.routes.stats.get_engine", _engine), \
+         patch("app.routes.health.get_engine", _engine):
         with TestClient(app, raise_server_exceptions=True) as c:
             yield c
 

@@ -4,8 +4,10 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter
 
+from sqlalchemy import text
+
 from ..config import get_settings
-from ..database import get_connection
+from ..database import get_engine
 from ..schemas import HealthResponse
 
 router = APIRouter()
@@ -24,18 +26,18 @@ async def health() -> HealthResponse:
     age_seconds = None
 
     try:
-        conn = get_connection(settings.database)
-        total = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
-        row = conn.execute(
-            "SELECT inserted_at FROM messages ORDER BY id DESC LIMIT 1"
-        ).fetchone()
-        if row:
-            last_msg_at = row["inserted_at"]
-            try:
-                dt = datetime.fromisoformat(last_msg_at.replace("Z", "+00:00"))
-                age_seconds = (datetime.now(tz=timezone.utc) - dt).total_seconds()
-            except ValueError:
-                pass
+        with get_engine(settings.database).connect() as conn:
+            total = conn.execute(text("SELECT COUNT(*) FROM messages")).scalar() or 0
+            row = conn.execute(
+                text("SELECT inserted_at FROM messages ORDER BY id DESC LIMIT 1")
+            ).fetchone()
+            if row:
+                last_msg_at = row[0]
+                try:
+                    dt = datetime.fromisoformat(last_msg_at.replace("Z", "+00:00"))
+                    age_seconds = (datetime.now(tz=timezone.utc) - dt).total_seconds()
+                except ValueError:
+                    pass
     except Exception:
         db_status = "error"
 

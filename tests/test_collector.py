@@ -1,8 +1,8 @@
 import os
-import time
 import pytest
+from sqlalchemy import text
 
-from app.database import init_db, get_connection
+from app.database import init_db, get_engine, get_conn
 from app.collector import (
     drain,
     load_offset,
@@ -97,16 +97,16 @@ def test_collector_resumes_from_checkpoint(env, tmp_path):
     line = '{"t":1786897449,"freq":136975000,"station_id":"adsb-pi","avlc":{"src":{"addr":"4CADF7","type":"Aircraft"},"dst":{"addr":"1099CA","type":"Ground station"}}}'
     _write_spool(spool, [line])
 
-    # First run — processes the line
     run_collector(spool_path=spool, db_path=db, poll_interval=0, _stop_after=1)
-    count_after_first = get_connection(db).execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+    with get_engine(db).connect() as conn:
+        count_after_first = conn.execute(text("SELECT COUNT(*) FROM messages")).scalar()
 
-    # Second run — checkpoint means the line is not re-read
     run_collector(spool_path=spool, db_path=db, poll_interval=0, _stop_after=1)
-    count_after_second = get_connection(db).execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+    with get_engine(db).connect() as conn:
+        count_after_second = conn.execute(text("SELECT COUNT(*) FROM messages")).scalar()
 
     assert count_after_first == 1
-    assert count_after_second == 1  # no duplicate
+    assert count_after_second == 1
 
 
 # ---------------------------------------------------------------------------
@@ -115,30 +115,23 @@ def test_collector_resumes_from_checkpoint(env, tmp_path):
 
 def test_purge_old_messages(env, tmp_path):
     db, _ = env
-    conn = get_connection(db)
-    # Insert a message with an old inserted_at
-    conn.execute(
-        """INSERT INTO messages
-           (received_at, raw_json, inserted_at, message_hash)
-           VALUES (?, ?, datetime('now', '-31 days'), ?)""",
-        ("2026-01-01T00:00:00Z", "{}", "oldhash"),
-    )
-    conn.commit()
+    with get_conn(db) as conn:
+        conn.execute(text("""
+            INSERT INTO messages (received_at, raw_json, inserted_at, message_hash)
+            VALUES ('2026-01-01T00:00:00Z', '{}', datetime('now', '-31 days'), 'oldhash')
+        """))
     deleted = purge_old_messages(db_path=db, retention_days=30)
     assert deleted == 1
-    remaining = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
-    assert remaining == 0
+    with get_engine(db).connect() as conn:
+        assert conn.execute(text("SELECT COUNT(*) FROM messages")).scalar() == 0
 
 
 def test_purge_keeps_recent_messages(env):
     db, _ = env
-    conn = get_connection(db)
-    conn.execute(
-        """INSERT INTO messages
-           (received_at, raw_json, inserted_at, message_hash)
-           VALUES (?, ?, datetime('now', '-1 days'), ?)""",
-        ("2026-08-15T00:00:00Z", "{}", "recenthash"),
-    )
-    conn.commit()
+    with get_conn(db) as conn:
+        conn.execute(text("""
+            INSERT INTO messages (received_at, raw_json, inserted_at, message_hash)
+            VALUES ('2026-08-15T00:00:00Z', '{}', datetime('now', '-1 days'), 'recenthash')
+        """))
     deleted = purge_old_messages(db_path=db, retention_days=30)
     assert deleted == 0
