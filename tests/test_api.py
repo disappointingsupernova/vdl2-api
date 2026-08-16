@@ -66,7 +66,7 @@ def client(tmp_path):
     from app.main import app
     with patch("app.main.get_settings", _settings), \
          patch("app.main.init_db", lambda path=None: None), \
-         patch("app.main.run_collector", lambda **_: None), \
+         patch("app.main.run_collector", lambda: None), \
          patch("app.main.purge_old_messages", lambda **_: 0), \
          patch("app.routes.messages.get_settings", _settings), \
          patch("app.routes.aircraft.get_settings", _settings), \
@@ -141,6 +141,20 @@ def test_timestamp_format(client):
     assert ts.endswith("Z") and "T" in ts
 
 
+def test_since_filter(client):
+    # since after the first message timestamp — should return only the second
+    body = client.get("/api/v1/messages?since=2026-08-16T16:24:10.000Z").json()
+    assert body["count"] == 1
+    assert body["messages"][0]["id"] == 2
+
+
+def test_until_filter(client):
+    # until before the second message timestamp — should return only the first
+    body = client.get("/api/v1/messages?until=2026-08-16T16:24:10.000Z").json()
+    assert body["count"] == 1
+    assert body["messages"][0]["id"] == 1
+
+
 # ---------------------------------------------------------------------------
 # /api/v1/messages/latest
 # ---------------------------------------------------------------------------
@@ -149,6 +163,9 @@ def test_latest_returns_newest_first(client):
     body = client.get("/api/v1/messages/latest?limit=10").json()
     assert body["count"] == 2
     assert body["messages"][0]["id"] > body["messages"][1]["id"]
+    # For /latest: last_id is the newest (highest id), first_id is the oldest
+    assert body["last_id"] == body["messages"][0]["id"]
+    assert body["first_id"] == body["messages"][1]["id"]
 
 
 # ---------------------------------------------------------------------------

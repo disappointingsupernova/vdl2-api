@@ -55,9 +55,10 @@ def test_save_offset_is_idempotent(env):
 
 def test_drain_inserts_messages(env):
     db, spool = env
+    expected = sum(1 for line in open(FIXTURE) if line.strip())
     with open(FIXTURE) as fh:
         n = drain(fh, db, FIXTURE)
-    assert n == 4
+    assert n == expected
 
 
 def test_drain_skips_malformed(env, tmp_path):
