@@ -4,9 +4,10 @@ import logging
 import threading
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.auth import verify_api_key
 from app.collector import purge_old_messages, run_collector
 from app.config import get_settings
 from app.database import init_db
@@ -68,7 +69,7 @@ if settings.cors_origins:
     )
 
 PREFIX = "/api/v1"
-app.include_router(messages.router, prefix=PREFIX, tags=["messages"])
-app.include_router(aircraft.router, prefix=PREFIX, tags=["aircraft"])
-app.include_router(stats.router, prefix=PREFIX, tags=["stats"])
-app.include_router(health.router, prefix=PREFIX, tags=["health"])
+app.include_router(messages.router, prefix=PREFIX, tags=["messages"], dependencies=[Depends(verify_api_key)])
+app.include_router(aircraft.router, prefix=PREFIX, tags=["aircraft"], dependencies=[Depends(verify_api_key)])
+app.include_router(stats.router, prefix=PREFIX, tags=["stats"], dependencies=[Depends(verify_api_key)])
+app.include_router(health.router, prefix=PREFIX, tags=["health"], dependencies=[Depends(verify_api_key)])

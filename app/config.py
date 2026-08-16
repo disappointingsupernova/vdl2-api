@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     # CORS — empty list means no cross-origin requests are permitted.
     cors_origins: List[str] = []
 
+    # API key authentication — disabled when empty.
+    # Set to a long random string to require X-API-Key on all requests.
+    api_key: str = ""
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_origins(cls, v: object) -> List[str]:
