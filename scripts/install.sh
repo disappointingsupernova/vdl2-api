@@ -181,6 +181,9 @@ if [[ ! -d "${INSTALL_DIR}" ]]; then
 fi
 
 # Copy application files from the repository
+# Mark the directory safe for git operations run as root (Git 2.35.2+
+# refuses to operate in directories owned by a different user).
+git config --global --add safe.directory "${INSTALL_DIR}"
 rsync -a --delete \
     --exclude='.git' \
     --exclude='.env' \

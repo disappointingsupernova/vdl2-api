@@ -72,6 +72,10 @@ info "Verifying installation and dependencies..."
 
 ok "  Installation found at ${INSTALL_DIR}"
 
+# Git 2.35.2+ refuses to operate in directories owned by a different user.
+# Mark the install directory safe so root can run git commands in it.
+git config --global --add safe.directory "${INSTALL_DIR}"
+
 # Check required tools
 for cmd in git rsync curl; do
     if ! command -v "${cmd}" &>/dev/null; then
