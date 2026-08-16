@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from contextlib import contextmanager
 from typing import Generator
 
@@ -50,6 +51,7 @@ class CollectorState(Base):
 
 
 _factories: dict[str, sessionmaker] = {}
+_factories_lock = threading.Lock()
 
 
 def _make_engine(db_path: str):
@@ -60,6 +62,11 @@ def _make_engine(db_path: str):
 
     @event.listens_for(engine, "connect")
     def _set_pragmas(conn, _record):
+        # WAL mode allows concurrent reads alongside writes.
+        # synchronous=NORMAL is safe with WAL and avoids an fsync on every
+        # commit — the trade-off is that a power loss between WAL checkpoint
+        # and fsync could lose the last committed transaction, which is
+        # acceptable for this workload.
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
         conn.execute("PRAGMA synchronous=NORMAL")
@@ -68,14 +75,19 @@ def _make_engine(db_path: str):
 
 
 def _get_factory(db_path: str) -> sessionmaker:
-    if db_path not in _factories:
-        _factories[db_path] = sessionmaker(bind=_make_engine(db_path), expire_on_commit=False)
-    return _factories[db_path]
+    # Lock protects against a race between the collector thread and the
+    # FastAPI event loop both calling _get_factory at startup.
+    with _factories_lock:
+        if db_path not in _factories:
+            engine = _make_engine(db_path)
+            _factories[db_path] = sessionmaker(bind=engine, expire_on_commit=False)
+        return _factories[db_path]
 
 
 def init_db(db_path: str | None = None) -> None:
     path = db_path or get_settings().database
-    Base.metadata.create_all(_get_factory(path).kw["bind"])
+    factory = _get_factory(path)
+    Base.metadata.create_all(factory.kw["bind"])
 
 
 @contextmanager
