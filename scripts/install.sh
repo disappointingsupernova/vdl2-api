@@ -48,6 +48,10 @@ SERVICE_USER="vdl2"
 PYTHON_MIN_VERSION="3.11"
 PYTHON_MAX_VERSION="3.13"  # pydantic-core wheels are not yet published for 3.14+
 
+# Override PYTHON to use a specific interpreter, e.g.:
+#   PYTHON=python3.12 sudo bash scripts/install.sh
+PYTHON="${PYTHON:-python3}"
+
 # Resolve the repository root (the directory containing this script's parent)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -84,8 +88,8 @@ check_cmd() {
 }
 
 # Python — check version meets minimum
-if command -v python3 &>/dev/null; then
-    PY_VERSION=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+if command -v "${PYTHON}" &>/dev/null; then
+    PY_VERSION=$("${PYTHON}" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
     PY_MAJOR=$(echo "${PY_VERSION}" | cut -d. -f1)
     PY_MINOR=$(echo "${PY_VERSION}" | cut -d. -f2)
     MIN_MINOR=$(echo "${PYTHON_MIN_VERSION}" | cut -d. -f2)
@@ -99,18 +103,29 @@ if command -v python3 &>/dev/null; then
         error "pydantic-core has no pre-built wheel and cannot be compiled"
         error "for Python 3.14+ (PyO3 maximum is 3.13 as of this release)."
         error ""
-        error "Install Python 3.11, 3.12, or 3.13 and re-run this script."
-        error "On Raspberry Pi OS:"
-        error "  sudo apt install python3.12 python3.12-venv"
-        error "Then set the system default or edit this script's python3 call."
+        # Detect distro to give the right install instructions
+        if grep -qi ubuntu /etc/os-release 2>/dev/null; then
+            error "On Ubuntu, use the deadsnakes PPA to install Python 3.12:"
+            error "  sudo apt install software-properties-common"
+            error "  sudo add-apt-repository ppa:deadsnakes/ppa"
+            error "  sudo apt update"
+            error "  sudo apt install python3.12 python3.12-venv"
+            error "Then re-run:"
+            error "  PYTHON=python3.12 sudo bash scripts/install.sh"
+        else
+            error "On Raspberry Pi OS / Debian:"
+            error "  sudo apt install python3.12 python3.12-venv"
+            error "Then re-run:"
+            error "  PYTHON=python3.12 sudo bash scripts/install.sh"
+        fi
         echo ""
         die "Aborting — unsupported Python version ${PY_VERSION}."
     else
-        ok "  Found: python3 ${PY_VERSION}"
+        ok "  Found: ${PYTHON} ${PY_VERSION}"
     fi
 else
     MISSING+=("python3")
-    warn "  Missing: python3"
+    warn "  Missing: ${PYTHON}"
 fi
 
 check_cmd "pip3"       "python3-pip"
@@ -119,7 +134,7 @@ check_cmd "rsync"      "rsync"
 check_cmd "dumpvdl2"   "dumpvdl2"
 
 # python3-venv — test by actually creating a venv
-if ! python3 -m venv --help &>/dev/null; then
+if ! "${PYTHON}" -m venv --help &>/dev/null; then
     MISSING+=("python3-venv")
     warn "  Missing: python3-venv module"
 else
@@ -210,7 +225,7 @@ info "Setting up Python virtual environment..."
 VENV_DIR="${INSTALL_DIR}/venv"
 
 if [[ ! -d "${VENV_DIR}" ]]; then
-    python3 -m venv "${VENV_DIR}"
+    "${PYTHON}" -m venv "${VENV_DIR}"
     chown -R "${SERVICE_USER}:${SERVICE_USER}" "${VENV_DIR}"
     ok "  Created virtual environment at ${VENV_DIR}"
 else
