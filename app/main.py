@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
@@ -25,7 +26,6 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     init_db(settings.database)
 
-    # Start collector in a daemon thread so it doesn't block the event loop.
     def _collector():
         health.collector_running = True
         try:
@@ -33,13 +33,10 @@ async def lifespan(app: FastAPI):
         finally:
             health.collector_running = False
 
-    t = threading.Thread(target=_collector, daemon=True, name="collector")
-    t.start()
+    threading.Thread(target=_collector, daemon=True, name="collector").start()
     log.info("Collector thread started")
 
-    # Start retention cleanup thread (runs once per hour).
     def _cleanup():
-        import time
         while True:
             time.sleep(3600)
             deleted = purge_old_messages()
@@ -51,25 +48,34 @@ async def lifespan(app: FastAPI):
     yield
 
 
-settings = get_settings()
+def _create_app() -> FastAPI:
+    # get_settings() is called here rather than at module scope so that
+    # importing app.main in tests does not trigger settings loading before
+    # patches are applied.
+    settings = get_settings()
 
-app = FastAPI(
-    title="VDL2 API",
-    description="REST API for decoded VDL Mode 2 messages collected from dumpvdl2.",
-    version="1.0.0",
-    lifespan=lifespan,
-)
-
-if settings.cors_origins:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.cors_origins,
-        allow_methods=["GET"],
-        allow_headers=["*"],
+    application = FastAPI(
+        title="VDL2 API",
+        description="REST API for decoded VDL Mode 2 messages collected from dumpvdl2.",
+        version="1.0.0",
+        lifespan=lifespan,
     )
 
-PREFIX = "/api/v1"
-app.include_router(messages.router, prefix=PREFIX, tags=["messages"], dependencies=[Depends(verify_api_key)])
-app.include_router(aircraft.router, prefix=PREFIX, tags=["aircraft"], dependencies=[Depends(verify_api_key)])
-app.include_router(stats.router, prefix=PREFIX, tags=["stats"], dependencies=[Depends(verify_api_key)])
-app.include_router(health.router, prefix=PREFIX, tags=["health"], dependencies=[Depends(verify_api_key)])
+    if settings.cors_origins:
+        application.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.cors_origins,
+            allow_methods=["GET"],
+            allow_headers=["*"],
+        )
+
+    PREFIX = "/api/v1"
+    application.include_router(messages.router, prefix=PREFIX, tags=["messages"], dependencies=[Depends(verify_api_key)])
+    application.include_router(aircraft.router, prefix=PREFIX, tags=["aircraft"], dependencies=[Depends(verify_api_key)])
+    application.include_router(stats.router, prefix=PREFIX, tags=["stats"], dependencies=[Depends(verify_api_key)])
+    application.include_router(health.router, prefix=PREFIX, tags=["health"], dependencies=[Depends(verify_api_key)])
+
+    return application
+
+
+app = _create_app()
