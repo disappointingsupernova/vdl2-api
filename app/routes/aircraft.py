@@ -22,18 +22,21 @@ async def aircraft_messages(
     limit: int = Query(100, ge=1, le=5000),
 ) -> MessagesResponse:
     settings = get_settings()
+    effective_limit = min(limit, settings.max_limit)
     msgs = query_messages(
         settings.database,
         after_id=after_id,
-        limit=min(limit, settings.max_limit),
+        limit=effective_limit + 1,
         icao=icao,
     )
+    has_more = len(msgs) > effective_limit
+    msgs = msgs[:effective_limit]
     return MessagesResponse(
         messages=msgs,
         count=len(msgs),
         first_id=msgs[0].id if msgs else None,
         last_id=msgs[-1].id if msgs else None,
-        has_more=False,
+        has_more=has_more,
     )
 
 
