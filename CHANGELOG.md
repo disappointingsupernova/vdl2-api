@@ -18,6 +18,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   and station ID (`adsb-pi`) replaced with `${DUMPVDL2_DEVICE}` and
   `${DUMPVDL2_STATION_ID}` environment variable references. The unit now
   reads these from `/opt/vdl2-api/.env` via `EnvironmentFile=`.
+- `systemd/dumpvdl2.service`: removed `rotate=hourly` from the `--output`
+  argument. With rotation enabled, dumpvdl2 writes to timestamped files
+  (`messages_YYYYMMDD_HH.jsonl`) rather than the configured path
+  (`messages.jsonl`), so the collector never found the spool file.
+  The collector handles long-running append-only files correctly via
+  byte-offset checkpointing; file rotation at the dumpvdl2 level is
+  not needed.
 - `.env.example`: added `DUMPVDL2_DEVICE` (default `0`) and
   `DUMPVDL2_STATION_ID` (default `my-vdl2-station`) with documentation
   explaining when a serial number is required vs an index, and how to
