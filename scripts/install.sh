@@ -94,12 +94,17 @@ if command -v python3 &>/dev/null; then
         MISSING+=("python${PYTHON_MIN_VERSION}")
         warn "  Python ${PY_VERSION} found but ${PYTHON_MIN_VERSION}+ required"
     elif [[ "${PY_MAJOR}" -eq 3 && "${PY_MINOR}" -gt "${MAX_MINOR}" ]]; then
-        warn "  Python ${PY_VERSION} detected — pre-built wheels for pydantic-core"
-        warn "  are not yet available for Python 3.14+. Installation may fail."
-        warn "  Recommended: use Python ${PYTHON_MIN_VERSION}–${PYTHON_MAX_VERSION}"
-        warn "  Continuing anyway — press Ctrl-C within 5 seconds to abort."
-        sleep 5
-        ok "  Found: python3 ${PY_VERSION} (proceeding with warning)"
+        echo ""
+        error "Python ${PY_VERSION} is not supported."
+        error "pydantic-core has no pre-built wheel and cannot be compiled"
+        error "for Python 3.14+ (PyO3 maximum is 3.13 as of this release)."
+        error ""
+        error "Install Python 3.11, 3.12, or 3.13 and re-run this script."
+        error "On Raspberry Pi OS:"
+        error "  sudo apt install python3.12 python3.12-venv"
+        error "Then set the system default or edit this script's python3 call."
+        echo ""
+        die "Aborting — unsupported Python version ${PY_VERSION}."
     else
         ok "  Found: python3 ${PY_VERSION}"
     fi
