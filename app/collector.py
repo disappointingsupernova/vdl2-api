@@ -19,7 +19,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import get_settings
-from app.database import CollectorState, Message, get_session, init_db
+from app.database import CollectorState, Message, get_session
 from app.parser import parse_message
 
 log = logging.getLogger(__name__)
@@ -109,8 +109,6 @@ def run_collector(
     settings = get_settings()
     spool = spool_path or settings.spool
     db = db_path or settings.database
-
-    init_db(db)
 
     log.info("Collector starting — spool=%s db=%s", spool, db)
 
