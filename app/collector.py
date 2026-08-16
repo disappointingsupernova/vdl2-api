@@ -12,9 +12,8 @@ from __future__ import annotations
 import logging
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -163,10 +162,13 @@ def purge_old_messages(db_path: str | None = None, retention_days: int | None = 
     settings = get_settings()
     db = db_path or settings.database
     days = retention_days if retention_days is not None else settings.retention_days
+    cutoff = (
+        datetime.now(tz=timezone.utc) - timedelta(days=days)
+    ).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     with get_session(db) as session:
         deleted = (
             session.query(Message)
-            .filter(Message.inserted_at < func.datetime("now", f"-{days} days"))
+            .filter(Message.inserted_at < cutoff)
             .delete(synchronize_session=False)
         )
         return deleted
