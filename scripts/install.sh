@@ -60,7 +60,7 @@ REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # Privilege check
 # ---------------------------------------------------------------------------
 if [[ "${EUID}" -ne 0 ]]; then
-    die "This script must be run as root. Try: sudo bash scripts/install.sh"
+    die "This script must be run as root. Try: PYTHON=${PYTHON} sudo -E bash scripts/install.sh"
 fi
 
 echo ""
@@ -110,13 +110,13 @@ if command -v "${PYTHON}" &>/dev/null; then
             error "  sudo add-apt-repository ppa:deadsnakes/ppa"
             error "  sudo apt update"
             error "  sudo apt install python3.12 python3.12-venv"
-            error "Then re-run:"
-            error "  PYTHON=python3.12 sudo bash scripts/install.sh"
+            error "Then re-run (the -E flag preserves the PYTHON variable through sudo):"
+            error "  PYTHON=python3.12 sudo -E bash scripts/install.sh"
         else
             error "On Raspberry Pi OS / Debian:"
             error "  sudo apt install python3.12 python3.12-venv"
             error "Then re-run:"
-            error "  PYTHON=python3.12 sudo bash scripts/install.sh"
+            error "  PYTHON=python3.12 sudo -E bash scripts/install.sh"
         fi
         echo ""
         die "Aborting — unsupported Python version ${PY_VERSION}."
