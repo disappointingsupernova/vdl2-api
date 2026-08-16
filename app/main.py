@@ -72,9 +72,20 @@ async def lifespan(app: FastAPI):
 
     log.info("Shutdown: signalling collector to stop")
     stop_event.set()
+    # 10 s is generous for a normal shutdown. During a large catch-up drain
+    # (e.g. after a long outage) the collector may be mid-batch and take
+    # longer. If the join times out the thread is still running; the daemon
+    # flag ensures the OS kills it when the process exits, which is the same
+    # outcome as before graceful shutdown was added. The WAL journal protects
+    # against DB corruption; the only loss is the checkpoint for the current
+    # batch, which will be re-processed on next startup (INSERT OR IGNORE
+    # makes that safe).
     collector_thread.join(timeout=10)
     if collector_thread.is_alive():
-        log.warning("Collector thread did not stop within 10 s — forcing exit")
+        log.warning(
+            "Collector thread did not stop within 10 s — "
+            "process will exit with thread still running (daemon)"
+        )
     else:
         log.info("Collector thread stopped cleanly")
 
