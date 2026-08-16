@@ -46,6 +46,11 @@ INSTALL_DIR="/opt/vdl2-api"
 DATA_DIR="/var/lib/vdl2"
 SERVICE_USER="vdl2"
 PYTHON_MIN_VERSION="3.11"
+PYTHON_MAX_VERSION="3.13"  # pydantic-core wheels are not yet published for 3.14+
+
+# Override PYTHON to use a specific interpreter, e.g.:
+#   sudo bash -c 'PYTHON=python3.12 bash /opt/vdl2-api/scripts/install.sh'
+PYTHON="${PYTHON:-python3}"
 
 # Resolve the repository root (the directory containing this script's parent)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -55,7 +60,7 @@ REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # Privilege check
 # ---------------------------------------------------------------------------
 if [[ "${EUID}" -ne 0 ]]; then
-    die "This script must be run as root. Try: sudo bash scripts/install.sh"
+    die "This script must be run as root. Try: sudo bash -c 'PYTHON=${PYTHON} bash scripts/install.sh'"
 fi
 
 echo ""
@@ -83,20 +88,44 @@ check_cmd() {
 }
 
 # Python — check version meets minimum
-if command -v python3 &>/dev/null; then
-    PY_VERSION=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+if command -v "${PYTHON}" &>/dev/null; then
+    PY_VERSION=$("${PYTHON}" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
     PY_MAJOR=$(echo "${PY_VERSION}" | cut -d. -f1)
     PY_MINOR=$(echo "${PY_VERSION}" | cut -d. -f2)
     MIN_MINOR=$(echo "${PYTHON_MIN_VERSION}" | cut -d. -f2)
+    MAX_MINOR=$(echo "${PYTHON_MAX_VERSION}" | cut -d. -f2)
     if [[ "${PY_MAJOR}" -lt 3 ]] || [[ "${PY_MAJOR}" -eq 3 && "${PY_MINOR}" -lt "${MIN_MINOR}" ]]; then
         MISSING+=("python${PYTHON_MIN_VERSION}")
         warn "  Python ${PY_VERSION} found but ${PYTHON_MIN_VERSION}+ required"
+    elif [[ "${PY_MAJOR}" -eq 3 && "${PY_MINOR}" -gt "${MAX_MINOR}" ]]; then
+        echo ""
+        error "Python ${PY_VERSION} is not supported."
+        error "pydantic-core has no pre-built wheel and cannot be compiled"
+        error "for Python 3.14+ (PyO3 maximum is 3.13 as of this release)."
+        error ""
+        # Detect distro to give the right install instructions
+        if grep -qi ubuntu /etc/os-release 2>/dev/null; then
+            error "On Ubuntu, use the deadsnakes PPA to install Python 3.12:"
+            error "  sudo apt install software-properties-common"
+            error "  sudo add-apt-repository ppa:deadsnakes/ppa"
+            error "  sudo apt update"
+            error "  sudo apt install python3.12 python3.12-venv"
+            error "Then re-run:"
+            error "  sudo bash -c 'PYTHON=python3.12 bash /opt/vdl2-api/scripts/install.sh'"
+        else
+            error "On Raspberry Pi OS / Debian:"
+            error "  sudo apt install python3.12 python3.12-venv"
+            error "Then re-run:"
+            error "  sudo bash -c 'PYTHON=python3.12 bash /opt/vdl2-api/scripts/install.sh'"
+        fi
+        echo ""
+        die "Aborting — unsupported Python version ${PY_VERSION}."
     else
-        ok "  Found: python3 ${PY_VERSION}"
+        ok "  Found: ${PYTHON} ${PY_VERSION}"
     fi
 else
     MISSING+=("python3")
-    warn "  Missing: python3"
+    warn "  Missing: ${PYTHON}"
 fi
 
 check_cmd "pip3"       "python3-pip"
@@ -105,7 +134,7 @@ check_cmd "rsync"      "rsync"
 check_cmd "dumpvdl2"   "dumpvdl2"
 
 # python3-venv — test by actually creating a venv
-if ! python3 -m venv --help &>/dev/null; then
+if ! "${PYTHON}" -m venv --help &>/dev/null; then
     MISSING+=("python3-venv")
     warn "  Missing: python3-venv module"
 else
@@ -172,6 +201,9 @@ if [[ ! -d "${INSTALL_DIR}" ]]; then
 fi
 
 # Copy application files from the repository
+# Mark the directory safe for git operations run as root (Git 2.35.2+
+# refuses to operate in directories owned by a different user).
+git config --global --add safe.directory "${INSTALL_DIR}"
 rsync -a --delete \
     --exclude='.git' \
     --exclude='.env' \
@@ -193,15 +225,18 @@ info "Setting up Python virtual environment..."
 VENV_DIR="${INSTALL_DIR}/venv"
 
 if [[ ! -d "${VENV_DIR}" ]]; then
-    sudo -u "${SERVICE_USER}" python3 -m venv "${VENV_DIR}"
+    "${PYTHON}" -m venv "${VENV_DIR}"
+    chown -R "${SERVICE_USER}:${SERVICE_USER}" "${VENV_DIR}"
     ok "  Created virtual environment at ${VENV_DIR}"
 else
     ok "  Virtual environment already exists at ${VENV_DIR}"
 fi
 
 info "Installing Python dependencies..."
-sudo -u "${SERVICE_USER}" "${VENV_DIR}/bin/pip" install --quiet --upgrade pip
-sudo -u "${SERVICE_USER}" "${VENV_DIR}/bin/pip" install --quiet -r "${INSTALL_DIR}/requirements.txt"
+# Run pip as root with HOME pointed at a writable directory so the cache
+# does not attempt to write to /home/vdl2 which does not exist (system user).
+HOME="${INSTALL_DIR}" "${VENV_DIR}/bin/pip" install --no-cache-dir --upgrade pip
+HOME="${INSTALL_DIR}" "${VENV_DIR}/bin/pip" install --no-cache-dir -r "${INSTALL_DIR}/requirements.txt"
 ok "  Python dependencies installed"
 echo ""
 

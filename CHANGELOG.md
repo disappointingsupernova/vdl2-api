@@ -10,6 +10,44 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.0.1] — 2026-08-16
+
+### Fixed
+
+- `install.sh`: pip cache failure on system users with no home directory.
+  `vdl2` is created with `--no-create-home`; pip tried to write to
+  `/home/vdl2/.cache` which does not exist. Fixed by running pip as root
+  with `HOME` set to the install directory and `--no-cache-dir`.
+- `install.sh`: venv creation used `sudo -u vdl2` which fails for the same
+  reason. Now creates the venv as root then `chown`s it to `vdl2`.
+- `install.sh` / `update.sh`: `git` operations failed with a "dubious
+  ownership" error (Git 2.35.2+) when root operates in a directory owned
+  by `vdl2`. Fixed by running `git config --global --add safe.directory`
+  before any git operation.
+- `install.sh` / `update.sh`: `git pull` and `pip install` ran with
+  `sudo -u vdl2` which fails for the no-home-directory reason above.
+  Both now run as root.
+- `install.sh` / `update.sh`: `--quiet` removed from pip calls. On
+  Python 3.14 where no wheel exists, pip silently attempted a multi-minute
+  Rust compilation with no output, appearing to hang.
+- `install.sh`: Python 3.14 was a 5-second warning that let the install
+  proceed and fail deep inside a Rust build. Changed to a hard failure
+  with a clear error message. `pydantic-core` uses PyO3 0.24.1 which has
+  a hard maximum of Python 3.13.
+- `install.sh`: Error message is now distro-aware. Ubuntu 26.04 ships
+  Python 3.14 as the system default and does not have `python3.12` in
+  its standard repos. Ubuntu users are directed to the deadsnakes PPA;
+  Raspberry Pi OS / Debian users get the standard `apt install` command.
+- `install.sh`: Added `PYTHON` environment variable override so operators
+  can specify a non-default interpreter without editing the script:
+  `sudo bash -c 'PYTHON=python3.12 bash /opt/vdl2-api/scripts/install.sh'`.
+  All `python3` calls in the script body use `${PYTHON}`.
+- `install.sh` / `update.sh`: `sudo -E` replaced with `sudo bash -c '...'`
+  throughout. Ubuntu's sudo configuration disables `-E` entirely, so
+  environment variables must be passed inline to the bash subprocess.
+
+---
+
 ## [1.1.0] — 2026-08-16
 
 ### Added

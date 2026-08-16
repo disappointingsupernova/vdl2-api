@@ -2,7 +2,7 @@
 
 > A lightweight Python service for Raspberry Pi that collects decoded VDL Mode 2 aviation messages from `dumpvdl2`, stores them persistently in SQLite, and exposes them through a REST API.
 
-![Python](https://img.shields.io/badge/python-3.11%2B-blue)
+![Python](https://img.shields.io/badge/python-3.11--3.13-blue)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688)
 ![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.0-red)
 ![SQLite](https://img.shields.io/badge/database-SQLite-003B57)
@@ -58,8 +58,8 @@ flowchart TD
 
 ## Requirements
 
-- Raspberry Pi (or any Linux host) running Raspberry Pi OS / Debian
-- Python 3.11+
+- Raspberry Pi (or any Linux host) running Raspberry Pi OS, Debian, or Ubuntu
+- Python 3.11–3.13 (Python 3.14+ is not yet supported — see [Python version note](#python-version-note) below)
 - `dumpvdl2` 2.7.0 with `libacars` 2.2.1
 - RTL-SDR (Nooelec NESDR SMArt v5, serial `64466840`)
 - `rsync`, `git`, `curl` (used by the install and update scripts)
@@ -68,12 +68,48 @@ flowchart TD
 
 ## Installation
 
+### Python version note
+
+`pydantic-core` requires Python 3.11–3.13. Python 3.14 is not yet supported because the underlying Rust extension (PyO3) has a hard maximum of Python 3.13 as of this release. The install script detects this and exits with instructions.
+
+**Raspberry Pi OS / Debian** — Python 3.12 is available in the standard repos:
+
+```bash
+sudo apt install python3.12 python3.12-venv
+```
+
+**Ubuntu 24.04+ / 26.04** — Python 3.14 is the system default and 3.12 is not in the standard repos. Use the deadsnakes PPA:
+
+```bash
+sudo apt install software-properties-common
+sudo add-apt-repository ppa:deadsnakes/ppa
+sudo apt update
+sudo apt install python3.12 python3.12-venv
+```
+
+Then pass the interpreter to the install script:
+
+```bash
+sudo bash -c 'PYTHON=python3.12 bash /opt/vdl2-api/scripts/install.sh'
+```
+
+This does **not** change your system default Python. The venv at `/opt/vdl2-api/venv` is permanently pinned to 3.12; `python3` on the system remains unchanged.
+
+---
+
+### Quick install
+
 The quickest path is the install script. It checks all dependencies, creates the system user, installs the application, and enables the systemd units.
 
 ```bash
 git clone https://github.com/disappointingsupernova/vdl2-api /opt/vdl2-api
 cd /opt/vdl2-api
+
+# Standard install (Raspberry Pi OS / Debian with Python 3.11-3.13)
 sudo bash scripts/install.sh
+
+# Ubuntu with Python 3.14 as system default — use deadsnakes Python 3.12
+sudo bash -c 'PYTHON=python3.12 bash /opt/vdl2-api/scripts/install.sh'
 ```
 
 The script is idempotent — running it again on an existing installation updates the files without touching the database or `.env`.
