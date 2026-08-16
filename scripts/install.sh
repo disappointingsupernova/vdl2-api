@@ -49,7 +49,7 @@ PYTHON_MIN_VERSION="3.11"
 PYTHON_MAX_VERSION="3.13"  # pydantic-core wheels are not yet published for 3.14+
 
 # Override PYTHON to use a specific interpreter, e.g.:
-#   PYTHON=python3.12 sudo bash scripts/install.sh
+#   sudo bash -c 'PYTHON=python3.12 bash /opt/vdl2-api/scripts/install.sh'
 PYTHON="${PYTHON:-python3}"
 
 # Resolve the repository root (the directory containing this script's parent)
@@ -60,7 +60,7 @@ REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # Privilege check
 # ---------------------------------------------------------------------------
 if [[ "${EUID}" -ne 0 ]]; then
-    die "This script must be run as root. Try: PYTHON=${PYTHON} sudo -E bash scripts/install.sh"
+    die "This script must be run as root. Try: sudo bash -c 'PYTHON=${PYTHON} bash scripts/install.sh'"
 fi
 
 echo ""
@@ -110,13 +110,13 @@ if command -v "${PYTHON}" &>/dev/null; then
             error "  sudo add-apt-repository ppa:deadsnakes/ppa"
             error "  sudo apt update"
             error "  sudo apt install python3.12 python3.12-venv"
-            error "Then re-run (the -E flag preserves the PYTHON variable through sudo):"
-            error "  PYTHON=python3.12 sudo -E bash scripts/install.sh"
+            error "Then re-run:"
+            error "  sudo bash -c 'PYTHON=python3.12 bash /opt/vdl2-api/scripts/install.sh'"
         else
             error "On Raspberry Pi OS / Debian:"
             error "  sudo apt install python3.12 python3.12-venv"
             error "Then re-run:"
-            error "  PYTHON=python3.12 sudo -E bash scripts/install.sh"
+            error "  sudo bash -c 'PYTHON=python3.12 bash /opt/vdl2-api/scripts/install.sh'"
         fi
         echo ""
         die "Aborting — unsupported Python version ${PY_VERSION}."

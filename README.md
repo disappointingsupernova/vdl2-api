@@ -87,10 +87,10 @@ sudo apt update
 sudo apt install python3.12 python3.12-venv
 ```
 
-Then pass the interpreter to the install script. The `-E` flag preserves the `PYTHON` variable through the sudo boundary:
+Then pass the interpreter to the install script:
 
 ```bash
-PYTHON=python3.12 sudo -E bash scripts/install.sh
+sudo bash -c 'PYTHON=python3.12 bash /opt/vdl2-api/scripts/install.sh'
 ```
 
 This does **not** change your system default Python. The venv at `/opt/vdl2-api/venv` is permanently pinned to 3.12; `python3` on the system remains unchanged.
@@ -109,7 +109,7 @@ cd /opt/vdl2-api
 sudo bash scripts/install.sh
 
 # Ubuntu with Python 3.14 as system default — use deadsnakes Python 3.12
-PYTHON=python3.12 sudo -E bash scripts/install.sh
+sudo bash -c 'PYTHON=python3.12 bash /opt/vdl2-api/scripts/install.sh'
 ```
 
 The script is idempotent — running it again on an existing installation updates the files without touching the database or `.env`.

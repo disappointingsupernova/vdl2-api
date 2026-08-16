@@ -40,9 +40,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   Raspberry Pi OS / Debian users get the standard `apt install` command.
 - `install.sh`: Added `PYTHON` environment variable override so operators
   can specify a non-default interpreter without editing the script:
-  `PYTHON=python3.12 sudo -E bash scripts/install.sh`. The `-E` flag is
-  required to preserve the variable through the sudo boundary on Ubuntu.
+  `sudo bash -c 'PYTHON=python3.12 bash /opt/vdl2-api/scripts/install.sh'`.
   All `python3` calls in the script body use `${PYTHON}`.
+- `install.sh` / `update.sh`: `sudo -E` replaced with `sudo bash -c '...'`
+  throughout. Ubuntu's sudo configuration disables `-E` entirely, so
+  environment variables must be passed inline to the bash subprocess.
 
 ---
 
