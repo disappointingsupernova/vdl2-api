@@ -1,0 +1,144 @@
+import os
+import time
+import pytest
+
+from app.database import init_db, get_connection
+from app.collector import (
+    drain,
+    load_offset,
+    save_offset,
+    purge_old_messages,
+    run_collector,
+)
+
+FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "sample_messages.jsonl")
+
+
+@pytest.fixture
+def env(tmp_path):
+    db = str(tmp_path / "test.db")
+    spool = str(tmp_path / "messages.jsonl")
+    init_db(db)
+    return db, spool
+
+
+def _write_spool(path, lines):
+    with open(path, "w") as f:
+        for line in lines:
+            f.write(line + "\n")
+
+
+# ---------------------------------------------------------------------------
+# Checkpoint
+# ---------------------------------------------------------------------------
+
+def test_offset_defaults_to_zero(env):
+    db, spool = env
+    assert load_offset(db, spool) == 0
+
+
+def test_save_and_load_offset(env):
+    db, spool = env
+    save_offset(db, spool, 1234)
+    assert load_offset(db, spool) == 1234
+
+
+def test_save_offset_is_idempotent(env):
+    db, spool = env
+    save_offset(db, spool, 100)
+    save_offset(db, spool, 200)
+    assert load_offset(db, spool) == 200
+
+
+# ---------------------------------------------------------------------------
+# Drain
+# ---------------------------------------------------------------------------
+
+def test_drain_inserts_messages(env):
+    db, spool = env
+    with open(FIXTURE) as fh:
+        n = drain(fh, db, FIXTURE)
+    assert n == 4
+
+
+def test_drain_skips_malformed(env, tmp_path):
+    db, spool = env
+    bad = str(tmp_path / "bad.jsonl")
+    _write_spool(bad, ["{not json}", '{"t":1786897449,"freq":136975000,"station_id":"s","avlc":{}}'])
+    with open(bad) as fh:
+        n = drain(fh, db, bad)
+    assert n == 1
+
+
+def test_drain_deduplicates(env):
+    db, spool = env
+    with open(FIXTURE) as fh:
+        drain(fh, db, FIXTURE)
+    with open(FIXTURE) as fh:
+        n = drain(fh, db, FIXTURE)
+    assert n == 0  # all duplicates ignored
+
+
+def test_drain_updates_checkpoint(env):
+    db, spool = env
+    with open(FIXTURE) as fh:
+        drain(fh, db, FIXTURE)
+    offset = load_offset(db, FIXTURE)
+    assert offset == os.path.getsize(FIXTURE)
+
+
+# ---------------------------------------------------------------------------
+# Collector restart / checkpoint recovery
+# ---------------------------------------------------------------------------
+
+def test_collector_resumes_from_checkpoint(env, tmp_path):
+    db, _ = env
+    spool = str(tmp_path / "messages.jsonl")
+    line = '{"t":1786897449,"freq":136975000,"station_id":"adsb-pi","avlc":{"src":{"addr":"4CADF7","type":"Aircraft"},"dst":{"addr":"1099CA","type":"Ground station"}}}'
+    _write_spool(spool, [line])
+
+    # First run — processes the line
+    run_collector(spool_path=spool, db_path=db, poll_interval=0, _stop_after=1)
+    count_after_first = get_connection(db).execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+
+    # Second run — checkpoint means the line is not re-read
+    run_collector(spool_path=spool, db_path=db, poll_interval=0, _stop_after=1)
+    count_after_second = get_connection(db).execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+
+    assert count_after_first == 1
+    assert count_after_second == 1  # no duplicate
+
+
+# ---------------------------------------------------------------------------
+# Retention
+# ---------------------------------------------------------------------------
+
+def test_purge_old_messages(env, tmp_path):
+    db, _ = env
+    conn = get_connection(db)
+    # Insert a message with an old inserted_at
+    conn.execute(
+        """INSERT INTO messages
+           (received_at, raw_json, inserted_at, message_hash)
+           VALUES (?, ?, datetime('now', '-31 days'), ?)""",
+        ("2026-01-01T00:00:00Z", "{}", "oldhash"),
+    )
+    conn.commit()
+    deleted = purge_old_messages(db_path=db, retention_days=30)
+    assert deleted == 1
+    remaining = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+    assert remaining == 0
+
+
+def test_purge_keeps_recent_messages(env):
+    db, _ = env
+    conn = get_connection(db)
+    conn.execute(
+        """INSERT INTO messages
+           (received_at, raw_json, inserted_at, message_hash)
+           VALUES (?, ?, datetime('now', '-1 days'), ?)""",
+        ("2026-08-15T00:00:00Z", "{}", "recenthash"),
+    )
+    conn.commit()
+    deleted = purge_old_messages(db_path=db, retention_days=30)
+    assert deleted == 0
