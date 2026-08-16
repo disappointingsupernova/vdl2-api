@@ -1,6 +1,7 @@
 [Unit]
 Description=VDL2 API — collector and REST service
-After=network.target local-fs.target
+After=network.target local-fs.target dumpvdl2.service
+Wants=dumpvdl2.service
 Documentation=https://github.com/disappointingsupernova/vdl2-api
 
 [Service]
@@ -25,6 +26,7 @@ SyslogIdentifier=vdl2-api
 
 NoNewPrivileges=true
 ProtectSystem=strict
+ProtectHome=true
 ReadWritePaths=/var/lib/vdl2
 
 [Install]

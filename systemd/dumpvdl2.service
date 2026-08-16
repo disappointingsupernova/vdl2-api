@@ -26,8 +26,11 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=dumpvdl2
 
-# Prevent the process from acquiring new privileges
 NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/vdl2
 
 [Install]
 WantedBy=multi-user.target
