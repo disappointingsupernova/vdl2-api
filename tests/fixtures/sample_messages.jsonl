@@ -1,0 +1,4 @@
+{"t":1786897449,"freq":136975000,"station_id":"adsb-pi","avlc":{"src":{"addr":"4CADF7","type":"Aircraft"},"dst":{"addr":"1099CA","type":"Ground station"},"acars":{"label":"H1","reg":"EIEXS","flight":"EI501","msg_text":"#DFB/WRG POSRPT"}}}
+{"t":1786897512,"freq":136725000,"station_id":"adsb-pi","avlc":{"src":{"addr":"406A6E","type":"Aircraft"},"dst":{"addr":"1099CA","type":"Ground station"}}}
+{"t":1786897600,"freq":136875000,"station_id":"adsb-pi","avlc":{"src":{"addr":"1099CA","type":"Ground station"},"dst":{"addr":"4CADF7","type":"Aircraft"},"acars":{"label":"Q0","reg":"EIEXS","flight":"EI501"}}}
+{"t":1786897700,"freq":136825000,"station_id":"adsb-pi","avlc":{"src":{"addr":"3C6444","type":"Aircraft"},"dst":{"addr":"1099CA","type":"Ground station"},"x25":{"acars":{"label":"_d","reg":"DAABX","flight":"DLH123","msg_text":"FANS MESSAGE"}}}}
