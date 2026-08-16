@@ -1,6 +1,34 @@
 # VDL2 API
 
-A lightweight Python service for Raspberry Pi that collects decoded VDL Mode 2 messages from `dumpvdl2`, stores them in SQLite, and exposes them through a REST API.
+> A lightweight Python service for Raspberry Pi that collects decoded VDL Mode 2 aviation messages from `dumpvdl2`, stores them persistently in SQLite, and exposes them through a REST API.
+
+![Python](https://img.shields.io/badge/python-3.11%2B-blue)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688)
+![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.0-red)
+![SQLite](https://img.shields.io/badge/database-SQLite-003B57)
+![License](https://img.shields.io/badge/license-Apache%202.0-green)
+![Platform](https://img.shields.io/badge/platform-Raspberry%20Pi%20%7C%20Linux-lightgrey)
+
+---
+
+## What is VDL Mode 2?
+
+VDL Mode 2 (VHF Digital Link Mode 2) is a digital datalink protocol used by commercial aircraft to exchange operational messages with ground stations over VHF radio. It carries ACARS messages (position reports, weather, clearances), CPDLC (Controller–Pilot Data Link Communications), ADS-C position reports, and other aviation data. It operates on frequencies between 136 and 137 MHz and is receivable with an inexpensive RTL-SDR dongle and the open-source `dumpvdl2` decoder.
+
+This service sits between `dumpvdl2` and any application that wants to consume the decoded messages — a dashboard, a logger, a feed aggregator, or a custom analysis tool.
+
+---
+
+## Features
+
+- **No-loss polling** — messages are stored permanently and retrieved by cursor (`after_id`), not by timestamp window. A client that stops polling for an hour resumes exactly where it left off.
+- **Duplicate protection** — SHA-256 hash of each raw message prevents duplicates if the spool is replayed after a crash.
+- **File rotation handling** — detects `dumpvdl2`'s hourly JSONL rotation by inode comparison and drains the old file before switching.
+- **Crash recovery** — byte-offset checkpoint persisted to SQLite after every line; restarts resume without re-reading the whole file.
+- **Raw JSON preservation** — the complete original `dumpvdl2` JSON is stored verbatim. Future field additions require no schema changes.
+- **Optional API key authentication** — disabled by default; enabled by setting `VDL2_API_KEY`.
+- **Configurable CORS** — for browser-based dashboard clients.
+- **systemd integration** — hardened service units with `ProtectSystem`, `ProtectHome`, `PrivateTmp`.
 
 ---
 
@@ -54,11 +82,9 @@ sudo usermod -aG plugdev vdl2
 sudo mkdir -p /opt/vdl2-api
 sudo chown vdl2:vdl2 /opt/vdl2-api
 
-# Clone or copy the repository
 git clone https://github.com/disappointingsupernova/vdl2-api /opt/vdl2-api
 cd /opt/vdl2-api
 
-# Create a virtual environment and install dependencies
 python3 -m venv venv
 venv/bin/pip install -r requirements.txt
 ```
@@ -69,7 +95,6 @@ venv/bin/pip install -r requirements.txt
 sudo cp /opt/vdl2-api/.env.example /opt/vdl2-api/.env
 sudo chown vdl2:vdl2 /opt/vdl2-api/.env
 sudo chmod 640 /opt/vdl2-api/.env
-# Edit as required
 sudo nano /opt/vdl2-api/.env
 ```
 
@@ -83,6 +108,7 @@ Key variables:
 | `VDL2_SPOOL` | `/var/lib/vdl2/messages.jsonl` | dumpvdl2 JSONL output |
 | `VDL2_RETENTION_DAYS` | `30` | Message retention period |
 | `VDL2_CORS_ORIGINS` | _(empty)_ | Comma-separated allowed CORS origins |
+| `VDL2_API_KEY` | _(empty)_ | X-API-Key value; empty disables authentication |
 
 ### 4. Install systemd units
 
@@ -95,10 +121,7 @@ sudo systemctl daemon-reload
 ### 5. Enable and start the services
 
 ```bash
-# Start dumpvdl2 first so the spool file is created
 sudo systemctl enable --now dumpvdl2.service
-
-# Start the API and collector
 sudo systemctl enable --now vdl2-api.service
 ```
 
@@ -272,11 +295,31 @@ curl "http://adsb-pi:5001/api/v1/stats"
 
 ---
 
+## Authentication
+
+By default the API is open. To require an API key on all requests:
+
+```bash
+# Generate a key
+python3 -c "import secrets; print(secrets.token_hex(32))"
+
+# Add to .env
+VDL2_API_KEY=your-generated-key
+```
+
+Pass the key in the `X-API-Key` header:
+
+```bash
+curl -H "X-API-Key: your-generated-key" "http://adsb-pi:5001/api/v1/messages"
+```
+
+---
+
 ## Running tests
 
 ```bash
-cd /opt/vdl2-api
-venv/bin/python -m pytest -v
+pip install -r requirements-dev.txt
+pytest -v
 ```
 
 ---
@@ -286,13 +329,14 @@ venv/bin/python -m pytest -v
 ```
 /opt/vdl2-api/
 ├── app/
-│   ├── main.py          # FastAPI application, lifespan, CORS
+│   ├── main.py          # FastAPI app factory, lifespan, CORS, auth wiring
 │   ├── config.py        # Pydantic settings (VDL2_* env vars)
-│   ├── database.py      # SQLite connection, schema, WAL mode
-│   ├── models.py        # Shared query helpers
+│   ├── database.py      # SQLAlchemy ORM models, engine factory, get_session()
+│   ├── models.py        # Shared ORM query helper (query_messages)
 │   ├── schemas.py       # Pydantic response models
-│   ├── collector.py     # JSONL spool tailer, checkpoint, retention
-│   ├── parser.py        # dumpvdl2 JSON field extraction
+│   ├── collector.py     # JSONL spool tailer, checkpoint, rotation, retention
+│   ├── parser.py        # dumpvdl2 JSON field extraction and hashing
+│   ├── auth.py          # X-API-Key authentication dependency
 │   └── routes/
 │       ├── messages.py
 │       ├── aircraft.py
@@ -307,9 +351,14 @@ venv/bin/python -m pytest -v
 │   ├── test_database.py
 │   ├── test_parser.py
 │   ├── test_collector.py
-│   └── test_api.py
+│   ├── test_api.py
+│   └── test_auth.py
+├── AGENTS.md            # AI agent context
+├── CHANGELOG.md
+├── CONTRIBUTING.md
 ├── .env.example
 ├── requirements.txt
+├── requirements-dev.txt
 └── README.md
 ```
 
@@ -350,3 +399,23 @@ Key reliability properties:
 ## Upgrading dumpvdl2
 
 The raw dumpvdl2 JSON is stored verbatim in `raw_json`. If a new version of dumpvdl2 adds fields, they are automatically preserved without any schema change to the application.
+
+---
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+---
+
+## Built with AI assistance
+
+This project was developed with the assistance of [Amazon Q Developer](https://aws.amazon.com/q/developer/), an AI coding assistant built by AWS. The architecture, implementation, tests, and documentation were produced through an iterative conversation between the author and the AI — the author directed requirements, reviewed all output, and made all final decisions.
+
+The use of AI tooling is disclosed here in the spirit of transparency. The code has been reviewed, tested (48 automated tests), and is the responsibility of the project maintainer.
+
+---
+
+## Licence
+
+Apache 2.0 — see [LICENSE](LICENSE).
