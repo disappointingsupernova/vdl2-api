@@ -1,0 +1,31 @@
+[Unit]
+Description=VDL2 API — collector and REST service
+After=network.target local-fs.target
+Documentation=https://github.com/disappointingsupernova/vdl2-api
+
+[Service]
+Type=simple
+User=vdl2
+Group=vdl2
+WorkingDirectory=/opt/vdl2-api
+
+EnvironmentFile=-/opt/vdl2-api/.env
+
+ExecStartPre=/bin/mkdir -p /var/lib/vdl2
+ExecStart=/opt/vdl2-api/venv/bin/python -m uvicorn app.main:app \
+    --host ${VDL2_API_HOST:-0.0.0.0} \
+    --port ${VDL2_API_PORT:-5001} \
+    --no-access-log
+
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=vdl2-api
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/vdl2
+
+[Install]
+WantedBy=multi-user.target

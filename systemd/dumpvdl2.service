@@ -1,0 +1,33 @@
+[Unit]
+Description=dumpvdl2 VDL Mode 2 decoder
+After=network.target
+Documentation=https://github.com/szpajder/dumpvdl2
+
+[Service]
+Type=simple
+User=vdl2
+Group=vdl2
+
+ExecStartPre=/bin/mkdir -p /var/lib/vdl2
+ExecStart=/usr/local/bin/dumpvdl2 \
+    --rtlsdr 64466840 \
+    --station-id adsb-pi \
+    --utc \
+    --output decoded:json:file:path=/var/lib/vdl2/messages.jsonl,rotate=hourly \
+    136.725M \
+    136.775M \
+    136.825M \
+    136.875M \
+    136.975M
+
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=dumpvdl2
+
+# Prevent the process from acquiring new privileges
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
