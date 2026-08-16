@@ -26,19 +26,24 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     init_db(settings.database)
 
+    stop_event = threading.Event()
+
     def _collector():
         health.collector_running = True
         try:
-            run_collector()
+            run_collector(stop_event=stop_event)
         finally:
             health.collector_running = False
 
-    threading.Thread(target=_collector, daemon=True, name="collector").start()
+    collector_thread = threading.Thread(target=_collector, daemon=True, name="collector")
+    collector_thread.start()
     log.info("Collector thread started")
 
     def _cleanup():
-        while True:
-            time.sleep(3600)
+        while not stop_event.is_set():
+            stop_event.wait(timeout=3600)
+            if stop_event.is_set():
+                break
             deleted = purge_old_messages()
             if deleted:
                 log.info("Retention cleanup: removed %d message(s)", deleted)
@@ -46,6 +51,12 @@ async def lifespan(app: FastAPI):
     threading.Thread(target=_cleanup, daemon=True, name="retention").start()
 
     yield
+
+    log.info("Shutdown: signalling collector to stop")
+    stop_event.set()
+    collector_thread.join(timeout=10)
+    if collector_thread.is_alive():
+        log.warning("Collector thread did not stop within 10 s")
 
 
 def _create_app() -> FastAPI:

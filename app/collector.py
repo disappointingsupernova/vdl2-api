@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -115,6 +116,7 @@ def run_collector(
     db_path: str | None = None,
     poll_interval: float = 1.0,
     *,
+    stop_event: threading.Event | None = None,
     _stop_after: int | None = None,
 ) -> None:
     settings = get_settings()
@@ -128,7 +130,7 @@ def run_collector(
     iterations = 0
 
     try:
-        while True:
+        while not (stop_event and stop_event.is_set()):
             if _stop_after is not None:
                 if iterations >= _stop_after:
                     break

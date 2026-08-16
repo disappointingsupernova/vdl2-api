@@ -66,7 +66,7 @@ def client(tmp_path):
     from app.main import app
     with patch("app.main.get_settings", _settings), \
          patch("app.main.init_db", lambda path=None: None), \
-         patch("app.main.run_collector", lambda: None), \
+         patch("app.main.run_collector", lambda stop_event=None: None), \
          patch("app.main.purge_old_messages", lambda **_: 0), \
          patch("app.routes.messages.get_settings", _settings), \
          patch("app.routes.aircraft.get_settings", _settings), \
