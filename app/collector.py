@@ -59,27 +59,39 @@ def save_offset(db_path: str, spool_path: str, offset: int) -> None:
 
 def drain(fh, db_path: str, spool_path: str) -> int:
     """Read all complete lines from fh, insert into DB, return lines inserted."""
-    inserted = 0
+    records: list[dict] = []
+    final_offset = fh.tell()
+
     while True:
         raw_line = fh.readline()
         if not raw_line:
             break
         line = raw_line.strip()
         if not line:
-            save_offset(db_path, spool_path, fh.tell())
+            final_offset = fh.tell()
             continue
         record = parse_message(line)
         if record is None:
-            save_offset(db_path, spool_path, fh.tell())
+            final_offset = fh.tell()
             continue
-        try:
-            with get_session(db_path) as session:
+        records.append(record)
+        final_offset = fh.tell()
+
+    if not records:
+        return 0
+
+    inserted = 0
+    try:
+        with get_session(db_path) as session:
+            for record in records:
                 stmt = sqlite_insert(Message).values(**record).prefix_with("OR IGNORE")
                 result = session.execute(stmt)
                 inserted += result.rowcount
-        except SQLAlchemyError as exc:
-            log.error("DB insert error: %s", exc)
-        save_offset(db_path, spool_path, fh.tell())
+    except SQLAlchemyError as exc:
+        log.error("DB insert error: %s", exc)
+        return inserted
+
+    save_offset(db_path, spool_path, final_offset)
     return inserted
 
 
