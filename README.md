@@ -38,7 +38,7 @@ This service sits between `dumpvdl2` and any application that wants to consume t
 
 ```mermaid
 flowchart TD
-    SDR["RTL-SDR\n64466840"]
+    SDR["RTL-SDR"]
     DV["dumpvdl2"]
     SPOOL["JSONL spool\n/var/lib/vdl2/messages.jsonl"]
     COL["Python collector\napp/collector.py"]
@@ -61,7 +61,7 @@ flowchart TD
 - Raspberry Pi (or any Linux host) running Raspberry Pi OS, Debian, or Ubuntu
 - Python 3.11–3.13 (Python 3.14+ is not yet supported — see [Python version note](#python-version-note) below)
 - `dumpvdl2` 2.7.0 with `libacars` 2.2.1
-- RTL-SDR (Nooelec NESDR SMArt v5, serial `64466840`)
+- RTL-SDR dongle (e.g. Nooelec NESDR SMArt v5)
 - `rsync`, `git`, `curl` (used by the install and update scripts)
 
 ---
@@ -162,6 +162,10 @@ Key variables:
 | `VDL2_RETENTION_DAYS` | `30` | Message retention period |
 | `VDL2_CORS_ORIGINS` | _(empty)_ | Comma-separated allowed CORS origins |
 | `VDL2_API_KEY` | _(empty)_ | X-API-Key value; empty disables authentication |
+| `DUMPVDL2_DEVICE` | `0` | RTL-SDR device serial number or index — **must be set if you have multiple dongles** |
+| `DUMPVDL2_STATION_ID` | `my-vdl2-station` | Station identifier included in every decoded message |
+
+> **Multiple RTL-SDR devices on the same host** — if you run both VDL2 and ADS-B (or any other SDR service) on the same machine, each dongle must be identified by its serial number rather than its index, otherwise the wrong device may be claimed at startup. Find serial numbers with `rtl_test -t` or `rtl_eeprom`. Set `DUMPVDL2_DEVICE` to the serial number of the dongle dedicated to VDL2.
 
 #### 4. Install systemd units
 
