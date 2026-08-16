@@ -114,14 +114,8 @@ def _extract_acars(obj: dict) -> tuple[str | None, str | None, str | None, str |
     )
 
 
-def _make_hash(obj: dict, raw_json: str) -> str:
-    parts = "|".join([
-        str(obj.get("t") or ""),
-        str(obj.get("freq") or obj.get("frequency") or ""),
-        str(_extract_station(obj) or ""),
-        raw_json,
-    ])
-    return hashlib.sha256(parts.encode()).hexdigest()
+def _make_hash(raw_json: str) -> str:
+    return hashlib.sha256(raw_json.encode()).hexdigest()
 
 
 def parse_message(raw_json: str) -> dict | None:
@@ -170,7 +164,7 @@ def parse_message(raw_json: str) -> dict | None:
             "message_text": text,
             "raw_json": raw_json.strip(),
             "inserted_at": inserted_at,
-            "message_hash": _make_hash(obj, raw_json.strip()),
+            "message_hash": _make_hash(raw_json.strip()),
         }
     except Exception as exc:
         log.exception("Unexpected error parsing message: %s — line: %.120s", exc, raw_json)
