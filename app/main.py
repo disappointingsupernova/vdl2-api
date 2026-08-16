@@ -39,7 +39,7 @@ async def lifespan(app: FastAPI):
         log.warning("Authentication: disabled — set VDL2_API_KEY to require a key")
 
     if settings.cors_origins:
-        log.info("CORS: allowed origins — %s", ", ".join(settings.cors_origins))
+        log.info("CORS: allowed origins — %s", settings.cors_origins)
     else:
         log.info("CORS: disabled")
 
@@ -103,10 +103,11 @@ def _create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    if settings.cors_origins:
+    cors_list = settings.get_cors_origins()
+    if cors_list:
         application.add_middleware(
             CORSMiddleware,
-            allow_origins=settings.cors_origins,
+            allow_origins=cors_list,
             allow_methods=["GET"],
             allow_headers=["*"],
         )

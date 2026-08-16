@@ -23,7 +23,7 @@ def _cors_client(tmp_path, cors_origins: list[str]):
     test_settings = Settings(
         database=db,
         spool=str(tmp_path / "messages.jsonl"),
-        cors_origins=cors_origins,
+        cors_origins=",".join(cors_origins),
     )
 
     def _settings():
