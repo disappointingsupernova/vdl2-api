@@ -10,6 +10,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.0.2] — 2026-08-17
+
+### Fixed
+
+- `systemd/dumpvdl2.service`: hardcoded RTL-SDR serial number (`64466840`)
+  and station ID (`adsb-pi`) replaced with `${DUMPVDL2_DEVICE}` and
+  `${DUMPVDL2_STATION_ID}` environment variable references. The unit now
+  reads these from `/opt/vdl2-api/.env` via `EnvironmentFile=`.
+- `.env.example`: added `DUMPVDL2_DEVICE` (default `0`) and
+  `DUMPVDL2_STATION_ID` (default `my-vdl2-station`) with documentation
+  explaining when a serial number is required vs an index, and how to
+  find serial numbers with `rtl_test -t` or `rtl_eeprom`.
+- `README.md`: architecture diagram, requirements, and configuration table
+  updated to remove the site-specific serial number. Multi-SDR note added
+  explaining why serial numbers are necessary when multiple dongles share
+  a host (e.g. VDL2 + ADS-B).
+
+---
+
 ## [1.0.1] — 2026-08-16
 
 ### Fixed
