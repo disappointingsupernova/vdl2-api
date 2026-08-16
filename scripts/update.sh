@@ -176,8 +176,8 @@ info "Updating Python dependencies..."
 
 # Run pip as root with HOME pointed at the install dir so the cache does not
 # attempt to write to /home/vdl2 which does not exist (system user).
-HOME="${INSTALL_DIR}" "${VENV_DIR}/bin/pip" install --quiet --no-cache-dir --upgrade pip
-HOME="${INSTALL_DIR}" "${VENV_DIR}/bin/pip" install --quiet --no-cache-dir -r "${INSTALL_DIR}/requirements.txt"
+HOME="${INSTALL_DIR}" "${VENV_DIR}/bin/pip" install --no-cache-dir --upgrade pip
+HOME="${INSTALL_DIR}" "${VENV_DIR}/bin/pip" install --no-cache-dir -r "${INSTALL_DIR}/requirements.txt"
 ok "  Python dependencies updated"
 echo ""
 

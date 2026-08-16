@@ -215,8 +215,8 @@ fi
 info "Installing Python dependencies..."
 # Run pip as root with HOME pointed at a writable directory so the cache
 # does not attempt to write to /home/vdl2 which does not exist (system user).
-HOME="${INSTALL_DIR}" "${VENV_DIR}/bin/pip" install --quiet --no-cache-dir --upgrade pip
-HOME="${INSTALL_DIR}" "${VENV_DIR}/bin/pip" install --quiet --no-cache-dir -r "${INSTALL_DIR}/requirements.txt"
+HOME="${INSTALL_DIR}" "${VENV_DIR}/bin/pip" install --no-cache-dir --upgrade pip
+HOME="${INSTALL_DIR}" "${VENV_DIR}/bin/pip" install --no-cache-dir -r "${INSTALL_DIR}/requirements.txt"
 ok "  Python dependencies installed"
 echo ""
 
