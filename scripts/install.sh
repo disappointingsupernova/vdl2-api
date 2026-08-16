@@ -46,6 +46,7 @@ INSTALL_DIR="/opt/vdl2-api"
 DATA_DIR="/var/lib/vdl2"
 SERVICE_USER="vdl2"
 PYTHON_MIN_VERSION="3.11"
+PYTHON_MAX_VERSION="3.13"  # pydantic-core wheels are not yet published for 3.14+
 
 # Resolve the repository root (the directory containing this script's parent)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -88,9 +89,17 @@ if command -v python3 &>/dev/null; then
     PY_MAJOR=$(echo "${PY_VERSION}" | cut -d. -f1)
     PY_MINOR=$(echo "${PY_VERSION}" | cut -d. -f2)
     MIN_MINOR=$(echo "${PYTHON_MIN_VERSION}" | cut -d. -f2)
+    MAX_MINOR=$(echo "${PYTHON_MAX_VERSION}" | cut -d. -f2)
     if [[ "${PY_MAJOR}" -lt 3 ]] || [[ "${PY_MAJOR}" -eq 3 && "${PY_MINOR}" -lt "${MIN_MINOR}" ]]; then
         MISSING+=("python${PYTHON_MIN_VERSION}")
         warn "  Python ${PY_VERSION} found but ${PYTHON_MIN_VERSION}+ required"
+    elif [[ "${PY_MAJOR}" -eq 3 && "${PY_MINOR}" -gt "${MAX_MINOR}" ]]; then
+        warn "  Python ${PY_VERSION} detected — pre-built wheels for pydantic-core"
+        warn "  are not yet available for Python 3.14+. Installation may fail."
+        warn "  Recommended: use Python ${PYTHON_MIN_VERSION}–${PYTHON_MAX_VERSION}"
+        warn "  Continuing anyway — press Ctrl-C within 5 seconds to abort."
+        sleep 5
+        ok "  Found: python3 ${PY_VERSION} (proceeding with warning)"
     else
         ok "  Found: python3 ${PY_VERSION}"
     fi
@@ -193,15 +202,18 @@ info "Setting up Python virtual environment..."
 VENV_DIR="${INSTALL_DIR}/venv"
 
 if [[ ! -d "${VENV_DIR}" ]]; then
-    sudo -u "${SERVICE_USER}" python3 -m venv "${VENV_DIR}"
+    python3 -m venv "${VENV_DIR}"
+    chown -R "${SERVICE_USER}:${SERVICE_USER}" "${VENV_DIR}"
     ok "  Created virtual environment at ${VENV_DIR}"
 else
     ok "  Virtual environment already exists at ${VENV_DIR}"
 fi
 
 info "Installing Python dependencies..."
-sudo -u "${SERVICE_USER}" "${VENV_DIR}/bin/pip" install --quiet --upgrade pip
-sudo -u "${SERVICE_USER}" "${VENV_DIR}/bin/pip" install --quiet -r "${INSTALL_DIR}/requirements.txt"
+# Run pip as root with HOME pointed at a writable directory so the cache
+# does not attempt to write to /home/vdl2 which does not exist (system user).
+HOME="${INSTALL_DIR}" "${VENV_DIR}/bin/pip" install --quiet --no-cache-dir --upgrade pip
+HOME="${INSTALL_DIR}" "${VENV_DIR}/bin/pip" install --quiet --no-cache-dir -r "${INSTALL_DIR}/requirements.txt"
 ok "  Python dependencies installed"
 echo ""
 

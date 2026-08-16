@@ -148,8 +148,8 @@ info "  Current: ${CURRENT_BRANCH} @ ${CURRENT_SHA}"
 
 # Fetch and pull — preserve .env and any local-only files
 # git will not overwrite untracked files; .env is in .gitignore
-sudo -u "${SERVICE_USER}" git fetch origin
-sudo -u "${SERVICE_USER}" git pull --ff-only origin "${CURRENT_BRANCH}"
+git fetch origin
+git pull --ff-only origin "${CURRENT_BRANCH}"
 
 NEW_SHA=$(git rev-parse --short HEAD)
 
@@ -170,8 +170,10 @@ echo ""
 # ---------------------------------------------------------------------------
 info "Updating Python dependencies..."
 
-sudo -u "${SERVICE_USER}" "${VENV_DIR}/bin/pip" install --quiet --upgrade pip
-sudo -u "${SERVICE_USER}" "${VENV_DIR}/bin/pip" install --quiet -r "${INSTALL_DIR}/requirements.txt"
+# Run pip as root with HOME pointed at the install dir so the cache does not
+# attempt to write to /home/vdl2 which does not exist (system user).
+HOME="${INSTALL_DIR}" "${VENV_DIR}/bin/pip" install --quiet --no-cache-dir --upgrade pip
+HOME="${INSTALL_DIR}" "${VENV_DIR}/bin/pip" install --quiet --no-cache-dir -r "${INSTALL_DIR}/requirements.txt"
 ok "  Python dependencies updated"
 echo ""
 
