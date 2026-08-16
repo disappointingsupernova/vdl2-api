@@ -101,6 +101,7 @@ fi
 
 check_cmd "pip3"       "python3-pip"
 check_cmd "git"        "git"
+check_cmd "rsync"      "rsync"
 check_cmd "dumpvdl2"   "dumpvdl2"
 
 # python3-venv — test by actually creating a venv

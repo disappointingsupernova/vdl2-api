@@ -2,17 +2,17 @@
 # =============================================================================
 # update.sh — VDL2 API update script
 #
-# Updates an existing VDL2 API installation to the latest version from the
-# repository. Must be run as root (or via sudo) from the repository directory.
+# Updates an existing VDL2 API installation by pulling the latest code from
+# git and restarting the service. Must be run as root (or via sudo).
 #
 # Usage:
-#   sudo bash scripts/update.sh
+#   sudo bash /opt/vdl2-api/scripts/update.sh
 #
 # What this script does:
-#   1. Verifies the installation exists
+#   1. Verifies the installation and required tools exist
 #   2. Stops the vdl2-api service gracefully
 #   3. Backs up the current .env and database
-#   4. Copies updated application files
+#   4. Pulls the latest code from git (origin/main)
 #   5. Updates Python dependencies
 #   6. Reinstalls systemd units if they have changed
 #   7. Restarts the service
@@ -47,14 +47,11 @@ SERVICE_USER="vdl2"
 VENV_DIR="${INSTALL_DIR}/venv"
 BACKUP_DIR="${DATA_DIR}/backups"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-
 # ---------------------------------------------------------------------------
 # Privilege check
 # ---------------------------------------------------------------------------
 if [[ "${EUID}" -ne 0 ]]; then
-    die "This script must be run as root. Try: sudo bash scripts/update.sh"
+    die "This script must be run as root. Try: sudo bash ${INSTALL_DIR}/scripts/update.sh"
 fi
 
 echo ""
@@ -64,15 +61,25 @@ echo "=============================================="
 echo ""
 
 # ---------------------------------------------------------------------------
-# Step 1: Verify installation exists
+# Step 1: Verify installation and required tools
 # ---------------------------------------------------------------------------
-info "Verifying existing installation..."
+info "Verifying installation and dependencies..."
 
-[[ -d "${INSTALL_DIR}" ]]  || die "Installation not found at ${INSTALL_DIR}. Run install.sh first."
-[[ -d "${VENV_DIR}" ]]     || die "Virtual environment not found at ${VENV_DIR}. Run install.sh first."
-[[ -f "${INSTALL_DIR}/.env" ]] || die ".env not found at ${INSTALL_DIR}/.env. Run install.sh first."
+[[ -d "${INSTALL_DIR}" ]]       || die "Installation not found at ${INSTALL_DIR}. Run install.sh first."
+[[ -d "${VENV_DIR}" ]]          || die "Virtual environment not found at ${VENV_DIR}. Run install.sh first."
+[[ -f "${INSTALL_DIR}/.env" ]]  || die ".env not found at ${INSTALL_DIR}/.env. Run install.sh first."
+[[ -d "${INSTALL_DIR}/.git" ]]  || die "${INSTALL_DIR} is not a git repository. Cannot pull updates."
 
 ok "  Installation found at ${INSTALL_DIR}"
+
+# Check required tools
+for cmd in git rsync curl; do
+    if ! command -v "${cmd}" &>/dev/null; then
+        die "Required tool '${cmd}' not found. Install with: sudo apt install ${cmd}"
+    fi
+    ok "  Found: ${cmd}"
+done
+
 echo ""
 
 # ---------------------------------------------------------------------------
@@ -105,8 +112,8 @@ ok "  Backed up .env to ${BACKUP_PATH}/.env"
 
 DB_FILE="${DATA_DIR}/vdl2.db"
 if [[ -f "${DB_FILE}" ]]; then
-    # Use SQLite's online backup via the .backup command to get a consistent
-    # copy even if dumpvdl2 is still writing to the spool.
+    # Use SQLite's online backup to get a consistent copy even if dumpvdl2
+    # is still writing to the spool.
     if command -v sqlite3 &>/dev/null; then
         sqlite3 "${DB_FILE}" ".backup '${BACKUP_PATH}/vdl2.db'"
         ok "  Backed up database to ${BACKUP_PATH}/vdl2.db"
@@ -128,25 +135,34 @@ fi
 echo ""
 
 # ---------------------------------------------------------------------------
-# Step 4: Copy updated application files
+# Step 4: Pull latest code from git
 # ---------------------------------------------------------------------------
-info "Updating application files..."
+info "Pulling latest code from git..."
 
-rsync -a --delete \
-    --exclude='.git' \
-    --exclude='.env' \
-    --exclude='venv' \
-    --exclude='__pycache__' \
-    --exclude='*.pyc' \
-    --exclude='*.egg-info' \
-    "${REPO_DIR}/" "${INSTALL_DIR}/"
+cd "${INSTALL_DIR}"
 
-chown -R "${SERVICE_USER}:${SERVICE_USER}" "${INSTALL_DIR}"
-# Restore .env permissions in case rsync touched them
-chown "${SERVICE_USER}:${SERVICE_USER}" "${INSTALL_DIR}/.env"
-chmod 640 "${INSTALL_DIR}/.env"
+# Show what we're updating from/to
+CURRENT_SHA=$(git rev-parse --short HEAD)
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+info "  Current: ${CURRENT_BRANCH} @ ${CURRENT_SHA}"
 
-ok "  Application files updated"
+# Fetch and pull — preserve .env and any local-only files
+# git will not overwrite untracked files; .env is in .gitignore
+sudo -u "${SERVICE_USER}" git fetch origin
+sudo -u "${SERVICE_USER}" git pull --ff-only origin "${CURRENT_BRANCH}"
+
+NEW_SHA=$(git rev-parse --short HEAD)
+
+if [[ "${CURRENT_SHA}" == "${NEW_SHA}" ]]; then
+    ok "  Already up to date (${NEW_SHA})"
+else
+    ok "  Updated ${CURRENT_SHA} → ${NEW_SHA}"
+    # Show a brief summary of what changed
+    git log --oneline "${CURRENT_SHA}..${NEW_SHA}" | while read -r line; do
+        info "    ${line}"
+    done
+fi
+
 echo ""
 
 # ---------------------------------------------------------------------------
@@ -233,6 +249,7 @@ echo -e "  ${GREEN}Update complete${NC}"
 echo "=============================================="
 echo ""
 echo "  Backup saved to: ${BACKUP_PATH}"
+echo "  Now running:     $(git -C "${INSTALL_DIR}" rev-parse --short HEAD)"
 echo ""
 echo "  Service status:"
 echo "    sudo systemctl status vdl2-api.service"
