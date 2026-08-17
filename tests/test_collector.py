@@ -64,7 +64,7 @@ def test_drain_inserts_messages(env):
 def test_drain_skips_malformed(env, tmp_path):
     db, spool = env
     bad = str(tmp_path / "bad.jsonl")
-    _write_spool(bad, ["{not json}", '{"t":1786897449,"freq":136975000,"station_id":"s","avlc":{}}'])
+    _write_spool(bad, ["{not json}", '{"vdl2":{"t":{"sec":1786897449,"usec":0},"freq":136975000,"station":"s","avlc":{}}}'])
     with open(bad) as fh:
         n = drain(fh, db, bad)
     assert n == 1
@@ -94,7 +94,7 @@ def test_drain_updates_checkpoint(env):
 def test_collector_resumes_from_checkpoint(env, tmp_path):
     db, _ = env
     spool = str(tmp_path / "messages.jsonl")
-    line = '{"t":1786897449,"freq":136975000,"station_id":"adsb-pi","avlc":{"src":{"addr":"4CADF7","type":"Aircraft"},"dst":{"addr":"1099CA","type":"Ground station"}}}'
+    line = '{"vdl2":{"t":{"sec":1786897449,"usec":0},"freq":136975000,"station":"adsb-pi","avlc":{"src":{"addr":"4CADF7","type":"Aircraft"},"dst":{"addr":"1099CA","type":"Ground station"}}}}'
     _write_spool(spool, [line])
 
     run_collector(spool_path=spool, db_path=db, poll_interval=0, _stop_after=1)
@@ -143,8 +143,8 @@ def test_rotation_drains_old_file_and_switches_to_new(env, tmp_path):
     db, _ = env
     spool = str(tmp_path / "messages.jsonl")
 
-    line1 = '{"t":1786897449,"freq":136975000,"station_id":"s","avlc":{"src":{"addr":"AAAAAA","type":"Aircraft"},"dst":{"addr":"1099CA","type":"Ground station"}}}'
-    line2 = '{"t":1786897512,"freq":136975000,"station_id":"s","avlc":{"src":{"addr":"BBBBBB","type":"Aircraft"},"dst":{"addr":"1099CA","type":"Ground station"}}}'
+    line1 = '{"vdl2":{"t":{"sec":1786897449,"usec":0},"freq":136975000,"station":"s","avlc":{"src":{"addr":"AAAAAA","type":"Aircraft"},"dst":{"addr":"1099CA","type":"Ground station"}}}}'
+    line2 = '{"vdl2":{"t":{"sec":1786897512,"usec":0},"freq":136975000,"station":"s","avlc":{"src":{"addr":"BBBBBB","type":"Aircraft"},"dst":{"addr":"1099CA","type":"Ground station"}}}}'
 
     _write_spool(spool, [line1])
 

@@ -3,11 +3,12 @@ import pytest
 from app.parser import parse_message
 
 
-ACARS_DOWNLINK = '{"t":1786897449,"freq":136975000,"station_id":"adsb-pi","avlc":{"src":{"addr":"4CADF7","type":"Aircraft"},"dst":{"addr":"1099CA","type":"Ground station"},"acars":{"label":"H1","reg":"EIEXS","flight":"EI501","msg_text":"#DFB/WRG POSRPT"}}}'
-NO_ACARS = '{"t":1786897512,"freq":136725000,"station_id":"adsb-pi","avlc":{"src":{"addr":"406A6E","type":"Aircraft"},"dst":{"addr":"1099CA","type":"Ground station"}}}'
-UPLINK = '{"t":1786897600,"freq":136875000,"station_id":"adsb-pi","avlc":{"src":{"addr":"1099CA","type":"Ground station"},"dst":{"addr":"4CADF7","type":"Aircraft"},"acars":{"label":"Q0","reg":"EIEXS","flight":"EI501"}}}'
-X25_ACARS = '{"t":1786897700,"freq":136825000,"station_id":"adsb-pi","avlc":{"src":{"addr":"3C6444","type":"Aircraft"},"dst":{"addr":"1099CA","type":"Ground station"},"x25":{"acars":{"label":"_d","reg":"DAABX","flight":"DLH123","msg_text":"FANS MESSAGE"}}}}'
-NO_TIMESTAMP = '{"freq":136975000,"station_id":"adsb-pi","avlc":{}}'
+ACARS_DOWNLINK = '{"vdl2":{"app":{"name":"dumpvdl2","ver":"2.7.0"},"station":"adsb-pi","t":{"sec":1786897449,"usec":0},"freq":136975000,"avlc":{"src":{"addr":"4CADF7","type":"Aircraft"},"dst":{"addr":"1099CA","type":"Ground station"},"acars":{"label":"H1","reg":".EIEXS","flight":"EI501","msg_text":"#DFB/WRG POSRPT"}}}}'
+NO_ACARS = '{"vdl2":{"app":{"name":"dumpvdl2","ver":"2.7.0"},"station":"adsb-pi","t":{"sec":1786897512,"usec":0},"freq":136725000,"avlc":{"src":{"addr":"406A6E","type":"Aircraft"},"dst":{"addr":"1099CA","type":"Ground station"}}}}'
+UPLINK = '{"vdl2":{"app":{"name":"dumpvdl2","ver":"2.7.0"},"station":"adsb-pi","t":{"sec":1786897600,"usec":0},"freq":136875000,"avlc":{"src":{"addr":"1099CA","type":"Ground station"},"dst":{"addr":"4CADF7","type":"Aircraft"},"acars":{"label":"Q0","reg":".EIEXS","flight":"EI501","msg_text":""}}}}'
+X25_ACARS = '{"vdl2":{"app":{"name":"dumpvdl2","ver":"2.7.0"},"station":"adsb-pi","t":{"sec":1786897700,"usec":0},"freq":136825000,"avlc":{"src":{"addr":"3C6444","type":"Aircraft"},"dst":{"addr":"1099CA","type":"Ground station"},"x25":{"acars":{"label":"_d","reg":".DAABX","flight":"DLH123","msg_text":"FANS MESSAGE"}}}}}'
+NO_TIMESTAMP = '{"vdl2":{"freq":136975000,"station":"adsb-pi","avlc":{}}}'
+CPDLC = '{"vdl2":{"app":{"name":"dumpvdl2","ver":"2.7.0"},"station":"adsb-pi","t":{"sec":1786897800,"usec":0},"freq":136875000,"avlc":{"src":{"addr":"4CADF7","type":"Aircraft"},"dst":{"addr":"1099CA","type":"Ground station"},"x25":{"clnp":{"cotp":{"cpdlc":{"atc_downlink_msg":{"msg_elem":[{"msg_text":"WILCO"}]}}}}}}}}'
 
 
 def test_acars_downlink():
@@ -43,12 +44,32 @@ def test_uplink_direction():
     assert r["direction"] == "uplink"
 
 
+def test_uplink_empty_msg_text_is_null():
+    # Q0 ACK — empty msg_text should be stored as None, not ""
+    r = parse_message(UPLINK)
+    assert r is not None
+    assert r["message_text"] is None
+
+
+def test_reg_leading_dot_stripped():
+    r = parse_message(ACARS_DOWNLINK)
+    assert r is not None
+    assert r["aircraft_registration"] == "EIEXS"  # not ".EIEXS"
+
+
 def test_x25_acars_extraction():
     r = parse_message(X25_ACARS)
     assert r is not None
     assert r["aircraft_registration"] == "DAABX"
     assert r["flight_id"] == "DLH123"
     assert r["message_text"] == "FANS MESSAGE"
+
+
+def test_cpdlc_extraction():
+    r = parse_message(CPDLC)
+    assert r is not None
+    assert r["message_type"] == "_d"
+    assert r["message_text"] == "WILCO"
 
 
 def test_missing_timestamp_still_returns_record():
@@ -88,7 +109,7 @@ def test_raw_json_preserved():
 
 
 def test_icao_uppercased():
-    lower = '{"t":1786897449,"freq":136975000,"station_id":"adsb-pi","avlc":{"src":{"addr":"4cadf7","type":"Aircraft"},"dst":{"addr":"1099ca","type":"Ground station"}}}'
+    lower = '{"vdl2":{"t":{"sec":1786897449,"usec":0},"freq":136975000,"station":"adsb-pi","avlc":{"src":{"addr":"4cadf7","type":"Aircraft"},"dst":{"addr":"1099ca","type":"Ground station"}}}}'
     r = parse_message(lower)
     assert r["source_icao"] == "4CADF7"
     assert r["destination_icao"] == "1099CA"
